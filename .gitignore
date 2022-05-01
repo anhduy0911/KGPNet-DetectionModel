@@ -1,3 +1,8 @@
-*/__pycache__/*
-data/all_test
-data/all_train
+*/__pycache__
+data/pills/all_test
+data/pills/all_train
+data/pills/base_test
+data/pills/base_train
+data/pills/data_train
+data/pills/data_test
+logs/

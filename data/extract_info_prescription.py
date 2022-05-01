@@ -4,7 +4,9 @@ import re
 import jellyfish
 from pip import main
 import numpy as np
-BASE = '/mnt/disk1/vaipe-data/prescription/data_matching/prescriptioins-220310/'
+import config as CFG
+
+BASE = CFG.prescription_folder
 
 paths = os.listdir(BASE)
 
