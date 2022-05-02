@@ -105,8 +105,8 @@ def generate_pill_edges(pill_diagnose_path):
     pill_pill_edges.to_csv('data/graph/pill_pill_graph.csv')
 
 if __name__ == '__main__':
-    # build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
+    build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
     # prepare_prescription_dataset('data/prescriptions/condensed_data.json')
-    generate_pill_edges('data/graph/pill_diagnose_graph.csv')
+    # generate_pill_edges('data/graph/pill_diagnose_graph.csv')
     # condensed_result_file()
     # test()

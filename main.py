@@ -1,5 +1,6 @@
 import config as CFG
-from models.faster_rcnn import *
+# from models.faster_rcnn import *
+from models.KGPNet_2step import *
 
 def seed_everything(seed: int):
     import random, os
