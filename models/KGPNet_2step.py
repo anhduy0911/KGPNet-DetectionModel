@@ -14,7 +14,8 @@ def train(args):
     cfg.DATASETS.TRAIN = ("pills_train",)
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = os.path.join(CFG.warmstart_path, "model_final.pth")
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
     cfg.SOLVER.MAX_ITER = args.max_iters
@@ -23,6 +24,7 @@ def train(args):
     cfg.MODEL.ROI_HEADS.GRAPH_EBDS_PATH = CFG.graph_ebds_path
     cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE = 1024
     cfg.MODEL.ROI_HEADS.PREDICTOR_HIDDEN_SIZE = 128
+    cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT = args.linking_loss_weight
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.KEYPOINT_ON = False
@@ -53,6 +55,7 @@ def test(args):
     cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE = 1024
     cfg.MODEL.ROI_HEADS.GRAPH_EBDS_PATH = CFG.graph_ebds_path
     cfg.MODEL.ROI_HEADS.PREDICTOR_HIDDEN_SIZE = 128
+    cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT = args.linking_loss_weight
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.4

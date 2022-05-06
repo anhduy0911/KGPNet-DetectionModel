@@ -60,6 +60,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', type=bool, default=False, metavar='N', help='resume training')
     parser.add_argument('--n_classes', type=int, default=CFG.n_classes, metavar='N', help='number of classes')
     parser.add_argument('--max_iters', type=int, default=CFG.max_iters, metavar='N', help='number of max iteration')
+    parser.add_argument('--linking_loss_weight', type=float, default=CFG.linking_loss_weight, metavar='N', help='weight of linking loss')
     args = parser.parse_args()
     
     # init_distributed_mode(args)

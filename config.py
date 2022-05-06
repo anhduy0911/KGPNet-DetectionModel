@@ -5,9 +5,11 @@ prescription_folder = '/mnt/disk2/thanhnt/EMED-Pills-Label-Tool/thanhnt_statisti
 base_log = 'logs/'
 log_dir_data = 'logs/data/'
 graph_ebds_path = 'data/graph/graph_ebd.pt'
+warmstart_path = 'logs/baseline/'
 
 # statistics
 n_classes = 96
 n_workers = 4
 seed = 9110
 max_iters = 5000
+linking_loss_weight = 0.1
