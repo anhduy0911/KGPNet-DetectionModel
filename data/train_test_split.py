@@ -278,9 +278,10 @@ def main():
 if __name__ == '__main__':
     if not os.path.exists(datasets_path):
         os.mkdir(datasets_path)
-    for x in ["base", "few", "all", "data"]: 
-        for s_ in ["_train", "_test"]:
-            os.mkdir(os.path.join(datasets_path, x+s_))
-            for s in ["images", "labels"]:
-                os.mkdir(os.path.join(datasets_path, x+s_, s))
+    # for x in ["base", "few", "all", "data"]: 
+    #     for s_ in ["_train", "_test"]:
+    #         os.mkdir(os.path.join(datasets_path, x+s_))
+    #         for s in ["images", "labels"]:
+    #             os.mkdir(os.path.join(datasets_path, x+s_, s))
+    print('START PROCESS...')
     main()

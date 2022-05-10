@@ -18,6 +18,7 @@ from detectron2.layers import (
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
 from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute
+import config as CFG
 
 class Attention(nn.Module):
     def __init__(self, hidden_size, method="dot"):
@@ -64,6 +65,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
     def __init__(self, **kwargs):
         for arg in kwargs:
             print(arg)
+
         self.hidden_size = hidden_size = kwargs["hidden_size"]
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
@@ -74,13 +76,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         super().__init__(**kwargs)
 
         self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
+        self.warmstart_pseudo_output_heads()
+
         self.projection = nn.Sequential(
             nn.Linear(roi_features, hidden_size * 2),
             nn.ReLU(),
             nn.Linear(hidden_size * 2, hidden_size),
             nn.ReLU(),
         ) 
-
         self.attention = Attention(hidden_size, method='concat')
         self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
         self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
@@ -109,6 +112,18 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             # fmt: on
         }
 
+    def warmstart_pseudo_output_heads(self):
+        baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
+        # print(baseline_model['model'].keys())
+
+        self.pseudo_detector.bbox_pred.weight.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.weight']
+        self.pseudo_detector.bbox_pred.bias.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.bias']
+        self.pseudo_detector.cls_score.weight.data = baseline_model['model']['roi_heads.box_predictor.cls_score.weight']
+        self.pseudo_detector.cls_score.bias.data = baseline_model['model']['roi_heads.box_predictor.cls_score.bias']
+
+        for param in self.pseudo_detector.parameters():
+            param.requires_grad = False
+        
     def forward(self, x):
         """
         Args:
