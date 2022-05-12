@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
-from detectron2.layers import Conv2d, ShapeSpec, get_norm
+import torch_geometric.nn as pyg_nn
+from torch_geometric.data import Data
+from torch_geometric.utils import to_dense_adj
+import pandas as pd
 import fvcore.nn.weight_init as weight_init
 from detectron2.config import configurable
 from typing import List, Tuple
@@ -17,8 +19,11 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute
+from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, graph_embedding_loss
 import config as CFG
+import pickle
+import tqdm
+import matplotlib.pyplot as plt
 
 class Attention(nn.Module):
     def __init__(self, hidden_size, method="dot"):
@@ -51,6 +56,30 @@ class Attention(nn.Module):
             
             return self.weight(out).squeeze(-1)
 
+class GCN(nn.Module):
+    def __init__(self, n_class=CFG.n_class) -> None:
+        super(GCN, self).__init__()
+        self.conv1 = pyg_nn.GCNConv(CFG.n_class, 32)
+        self.tanh = nn.Tanh()
+        # self.conv2 = pyg_nn.GCNConv(32, 32)
+        # self.conv3 = pyg_nn.GCNConv(32, 32)
+        # self.conv4 = pyg_nn.GCNConv(32, 32)
+        self.conv5 = pyg_nn.GCNConv(32, 64)
+    
+    def forward(self, data):
+        x, edge_idx, edge_w = data.x, data.edge_index, data.edge_attr
+        x = self.conv1(x, edge_idx, edge_w)
+        x = self.tanh(x)
+        # x = self.conv2(x, edge_idx, edge_w)
+        # x = self.relu(x)
+        # x = self.conv3(x, edge_idx, edge_w)
+        # x = self.relu(x)
+        # x = self.conv4(x, edge_idx, edge_w)
+        # x = self.relu(x)
+        x = self.conv5(x, edge_idx, edge_w)
+
+        return x
+
 class KGPNetOutputLayers(FastRCNNOutputLayers):
     """
     Layers for predicting Fast R-CNN outputs:
@@ -69,15 +98,24 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.hidden_size = hidden_size = kwargs["hidden_size"]
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
-        self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
+        self.arg = kwargs
+        # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
+        self.device = kwargs["device"]
 
+        kwargs.pop("device")
         kwargs.pop("hidden_size")
         kwargs.pop("graph_ebd_path")
+        kwargs.pop("train_gcn")
         super().__init__(**kwargs)
 
         self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
-        self.warmstart_pseudo_output_heads()
+        # self.warmstart_pseudo_output_heads()
 
+        self.g_embedding, self.dense_adj_matrix = self.build_graph_data()
+        self.g_embedding = self.g_embedding.to(self.device)
+        self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
+        
+        self.graph_module = self.warmstart_gcn()
         self.projection = nn.Sequential(
             nn.Linear(roi_features, hidden_size * 2),
             nn.ReLU(),
@@ -96,6 +134,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
     @classmethod
     def from_config(cls, cfg):
         return {
+            "device": cfg.MODEL.DEVICE,
+            "train_gcn": cfg.MODEL.TRAIN_GCN,
             "input_shape": cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE,
             "box2box_transform": Box2BoxTransform(weights=cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS),
             # fmt: off
@@ -111,6 +151,72 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "loss_weight"           : {"loss_box_reg": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT, "loss_linking": cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT},
             # fmt: on
         }
+
+    def build_graph_data(self):
+        mapped_pill_idx = pickle.load(open(CFG.pill_root + 'name2id.pkl', "rb"))
+        edge_index = []
+        edge_weight = []
+        
+        pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_edges.csv', header=0)
+        for x, y, w in pill_edge.values:
+            assert(w > 0)
+            edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
+            edge_weight.append(w)
+            edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
+            edge_weight.append(w)
+        
+        data = Data(x=torch.eye(self.arg['num_classes'], dtype=torch.float32), edge_index=torch.tensor(edge_index).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
+        # print(data)
+        return data, torch.tensor(to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze(), dtype=torch.float32)
+
+    def warmstart_gcn(self):
+        import os.path as path
+        # print('Warmstarting GCN...')
+        # heads = ([8] * (3-1)) + [1]
+        # print(heads)
+        gcn = GCN(self.arg['num_classes']).to(self.device)
+        
+        if path.isfile(CFG.g_warmstart_path) and not self.args.train_gcn:
+            gcn.load_state_dict(torch.load(CFG.g_warmstart_path))
+            return gcn
+        else:
+            optimizer = torch.optim.AdamW(gcn.parameters())
+            criteria = graph_embedding_loss
+            gcn.train()
+            for i in tqdm(range(5000)):
+                optimizer.zero_grad()
+                out_feats = gcn(self.g_embedding)
+                loss = criteria(out_feats, self.dense_adj_matrix)
+                print('Ep {}: Loss {}'.format(i, loss.item()))
+
+                loss.backward()
+                optimizer.step()
+            
+            torch.save(gcn.state_dict(), CFG.g_warmstart_path)
+            self.visualize_g_embedding(gcn, 'g_embedding_after_warmstart')
+            print('FINISH PLOTTING>>>')
+            return gcn
+
+    def visualize_g_embedding(self, gcn, name):
+        out_features = gcn(self.g_embedding)
+        dot_inp = torch.matmul(out_features, out_features.t())
+        norm_inp = torch.norm(out_features, dim=1) + 1e-6
+        norm_mtx_inp = torch.matmul(norm_inp.unsqueeze(1), norm_inp.unsqueeze(0))
+        cosine_inp = dot_inp / norm_mtx_inp
+        cosine_inp = 1/2 * (cosine_inp + 1)
+        cosine_inp = cosine_inp - torch.eye(CFG.n_class).to(cosine_inp.device)
+        cosine_inp = cosine_inp / torch.max(cosine_inp, dim=1)[0]
+        # cosine_inp_max = torch.max(cosine_inp, dim=1, keepdim=True)[0]
+        # cosine_inp_min = torch.min(cosine_inp, dim=1, keepdim=True)[0]
+        # cosine_inp_scaled = (cosine_inp - cosine_inp_min) / (cosine_inp_max - cosine_inp_min + 1e-6)
+        cosine_inp_mask = cosine_inp > 0.8
+        import seaborn as sns
+
+        # cosine_inp_scaled = cosine_inp_scaled.detach().cpu().numpy()
+        cosine_inp_mask = cosine_inp_mask.detach().cpu().numpy()
+        cosine_inp = cosine_inp.detach().cpu().numpy()
+        ax = sns.heatmap(cosine_inp * cosine_inp_mask, cmap='viridis', vmin=0, vmax=1)
+        plt.savefig(CFG.log_dir_data + name + '.png', dpi=100)
 
     def warmstart_pseudo_output_heads(self):
         baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
@@ -146,7 +252,9 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         pseudo_scores = self.softmax(pseudo_scores)
         # g_embedding = torch.rand((self.num_classes + 1, self.hidden_size), device=x.device)
         self.graph_embedding = self.graph_embedding.to(x.device)
-        condensed_graph_embedding = torch.mm(pseudo_scores, self.graph_embedding)
+        g_embedding = self.gcn(self.g_embedding)
+        
+        condensed_graph_embedding = torch.mm(pseudo_scores, g_embedding)
         # print(condensed_graph_embedding.shape)
         # context attention module
         # scores = torch.mm(mapped_visual_embedding, condensed_graph_embedding.t())
