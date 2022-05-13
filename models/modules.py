@@ -22,7 +22,7 @@ from detectron2.utils.events import get_event_storage
 from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, graph_embedding_loss
 import config as CFG
 import pickle
-import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 class Attention(nn.Module):
@@ -57,14 +57,14 @@ class Attention(nn.Module):
             return self.weight(out).squeeze(-1)
 
 class GCN(nn.Module):
-    def __init__(self, n_class=CFG.n_class) -> None:
+    def __init__(self, n_class=CFG.n_classes) -> None:
         super(GCN, self).__init__()
-        self.conv1 = pyg_nn.GCNConv(CFG.n_class, 32)
+        self.conv1 = pyg_nn.GCNConv(CFG.n_classes, 32)
         self.tanh = nn.Tanh()
         # self.conv2 = pyg_nn.GCNConv(32, 32)
         # self.conv3 = pyg_nn.GCNConv(32, 32)
         # self.conv4 = pyg_nn.GCNConv(32, 32)
-        self.conv5 = pyg_nn.GCNConv(32, 64)
+        self.conv5 = pyg_nn.GCNConv(32, 128)
     
     def forward(self, data):
         x, edge_idx, edge_w = data.x, data.edge_index, data.edge_attr
@@ -92,13 +92,13 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
     """
     @configurable
     def __init__(self, **kwargs):
-        for arg in kwargs:
-            print(arg)
+        # for arg in kwargs:
+        #     print(arg)
 
         self.hidden_size = hidden_size = kwargs["hidden_size"]
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
-        self.arg = kwargs
+        self.arg = kwargs.copy()
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
 
@@ -115,7 +115,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.g_embedding = self.g_embedding.to(self.device)
         self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
         
-        self.graph_module = self.warmstart_gcn()
+        # self.graph_module = self.warmstart_gcn()
+        self.gcn = GCN(num_classes)
         self.projection = nn.Sequential(
             nn.Linear(roi_features, hidden_size * 2),
             nn.ReLU(),
@@ -157,17 +158,18 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         edge_index = []
         edge_weight = []
         
-        pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_edges.csv', header=0)
+        pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_graph.csv', header=0)
         for x, y, w in pill_edge.values:
             assert(w > 0)
-            edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
-            edge_weight.append(w)
-            edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
-            edge_weight.append(w)
+            if x in mapped_pill_idx and y in mapped_pill_idx:
+                edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
+                edge_weight.append(w)
+                edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
+                edge_weight.append(w)
         
         data = Data(x=torch.eye(self.arg['num_classes'], dtype=torch.float32), edge_index=torch.tensor(edge_index).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
         # print(data)
-        return data, torch.tensor(to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze(), dtype=torch.float32)
+        return data, to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
 
     def warmstart_gcn(self):
         import os.path as path
@@ -176,7 +178,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(heads)
         gcn = GCN(self.arg['num_classes']).to(self.device)
         
-        if path.isfile(CFG.g_warmstart_path) and not self.args.train_gcn:
+        if path.isfile(CFG.g_warmstart_path) and not self.arg['train_gcn']:
             gcn.load_state_dict(torch.load(CFG.g_warmstart_path))
             return gcn
         else:
@@ -204,7 +206,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         norm_mtx_inp = torch.matmul(norm_inp.unsqueeze(1), norm_inp.unsqueeze(0))
         cosine_inp = dot_inp / norm_mtx_inp
         cosine_inp = 1/2 * (cosine_inp + 1)
-        cosine_inp = cosine_inp - torch.eye(CFG.n_class).to(cosine_inp.device)
+        cosine_inp = cosine_inp - torch.eye(CFG.n_classes).to(cosine_inp.device)
         cosine_inp = cosine_inp / torch.max(cosine_inp, dim=1)[0]
         # cosine_inp_max = torch.max(cosine_inp, dim=1, keepdim=True)[0]
         # cosine_inp_min = torch.min(cosine_inp, dim=1, keepdim=True)[0]
@@ -251,9 +253,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(mapped_visual_embedding.shape)
         pseudo_scores = self.softmax(pseudo_scores)
         # g_embedding = torch.rand((self.num_classes + 1, self.hidden_size), device=x.device)
-        self.graph_embedding = self.graph_embedding.to(x.device)
+        self.g_embedding = self.g_embedding.to(x.device)
         g_embedding = self.gcn(self.g_embedding)
-        
+        # print(g_embedding.shape)
+        g_embedding = F.pad(g_embedding, (0, 0, 0, 1), mode='constant', value=0)
+        # print(g_embedding.shape)
         condensed_graph_embedding = torch.mm(pseudo_scores, g_embedding)
         # print(condensed_graph_embedding.shape)
         # context attention module
@@ -273,7 +277,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         proposal_deltas = self.bbox_pred(enhanced_vec)
         scores = self.cls_score(enhanced_vec)
         
-        return scores, proposal_deltas, mapped_visual_embedding
+        return scores, proposal_deltas, mapped_visual_embedding, g_embedding
 
     def losses(self, predictions, proposals):
         """
@@ -286,7 +290,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         Returns:
             Dict[str, Tensor]: dict of losses
         """
-        scores, proposal_deltas, mapped_visual = predictions
+        scores, proposal_deltas, mapped_visual, g_embedding = predictions
 
         # parse classification outputs
         gt_classes = (
@@ -294,7 +298,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         )
         _log_classification_stats(scores, gt_classes)
 
-        graph_gtruths = [self.graph_embedding[p.gt_classes] for p in proposals]
+        graph_gtruths = [g_embedding[p.gt_classes] for p in proposals]
         graph_gtruths = torch.stack(graph_gtruths, dim=0).view(-1, self.hidden_size).contiguous()
         
         # parse box regression outputs

@@ -1,6 +1,7 @@
 import config as CFG
 # from models.faster_rcnn import *
-from models.KGPNet_2step import *
+# from models.KGPNet_2step import *
+from models.KGPNet_e2e import *
 
 def seed_everything(seed: int):
     import random, os
@@ -65,6 +66,7 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
+    print(args)
     # init_distributed_mode(args)
     # seed_everything(args.seed)
     main(args)
