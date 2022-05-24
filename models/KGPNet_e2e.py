@@ -15,8 +15,8 @@ def train(args):
     cfg.DATASETS.TRAIN = ("pills_train",)
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
-    # cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
-    cfg.MODEL.WEIGHTS = os.path.join(CFG.warmstart_path, "model_final.pth")
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    # cfg.MODEL.WEIGHTS = os.path.join(CFG.warmstart_path, "model_final.pth")
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
     cfg.SOLVER.MAX_ITER = args.max_iters
@@ -82,17 +82,18 @@ def test(args):
 
     # visualization
     test_dict = DatasetCatalog.get("pills_test")
-    d = test_dict[2]
+    d = test_dict[5]
     im = cv2.imread(d["file_name"])
     outputs = predictor(im)
-    print(d['annotations'])
+    print(f'gtruth: {d["annotations"]}')
+    print(f'predict: {outputs["instances"]}')
     v = Visualizer(im[:, :, ::-1],
                     metadata=d,
                    #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
     )
     out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
     plt.imshow(out.get_image())
-    plt.savefig('eval.png', dpi=300)
+    plt.savefig(f'eval_{args.name}.png', dpi=300)
     
     # # evaluation
     evaluator = COCOEvaluator("pills_test", output_dir=cfg.OUTPUT_DIR)

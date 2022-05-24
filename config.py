@@ -13,5 +13,5 @@ g_warmstart_path = 'logs/graph/'
 n_classes = 96
 n_workers = 8
 seed = 9110
-max_iters = 80000
+max_iters = 10000
 linking_loss_weight = 0.1

@@ -24,6 +24,7 @@ import config as CFG
 import pickle
 import tqdm
 import matplotlib.pyplot as plt
+from torch.nn.functional import nll_loss
 
 class Attention(nn.Module):
     def __init__(self, hidden_size, method="dot"):
@@ -106,7 +107,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("graph_ebd_path")
         kwargs.pop("train_gcn")
         super().__init__(**kwargs)
-
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5}
         self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
         # self.warmstart_pseudo_output_heads()
 
@@ -197,7 +198,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         
         pseudo_scores, _ = self.pseudo_detector(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
-
         dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
         edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         x_context = self.graph_block(x, edge_idx, edge_w) # N, H
@@ -206,8 +206,12 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         proposal_deltas = self.bbox_pred(x_enhanced)
         scores = self.cls_score(x_enhanced)
-        
-        return scores, proposal_deltas, pseudo_scores
+
+        # proposal_deltas = self.bbox_pred(x)
+        # scores = self.cls_score(x)
+        # print(scores)
+        return scores, proposal_deltas, pseudo_scores_sm
+        # return scores, proposal_deltas, 0
 
     def losses(self, predictions, proposals):
         """
@@ -248,7 +252,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
-            "loss_p_cls": cross_entropy(pseudo_scores, gt_classes, reduction="mean")
+            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 

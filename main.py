@@ -36,11 +36,10 @@ def main(args):
 
     if args.mode == 'train':
         seed_everything(CFG.seed)
-        launch(train, args.n_gpus, args=(args,))
+        train(args)
     else:
         seed_everything(CFG.seed)
-        launch(test, args.n_gpus, args=(args,))
-
+        test(args)
 if __name__ == '__main__':
     import argparse
     
@@ -74,4 +73,4 @@ if __name__ == '__main__':
     
     # init_distributed_mode(args)
     # seed_everything(args.seed)
-    main(args)
+    launch(main, args.n_gpus, args=(args,))

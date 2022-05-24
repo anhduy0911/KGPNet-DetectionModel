@@ -61,7 +61,7 @@ def test(args):
 
     # visualization
     test_dict = DatasetCatalog.get("pills_test")
-    d = test_dict[2]
+    d = test_dict[5]
     im = cv2.imread(d["file_name"])
     outputs = predictor(im)
     print(d['annotations'])
@@ -71,7 +71,7 @@ def test(args):
     )
     out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
     plt.imshow(out.get_image())
-    plt.savefig('eval.png', dpi=300)
+    plt.savefig(f'eval_{args.name}.png', dpi=300)
     
     # # evaluation
     evaluator = COCOEvaluator("pills_test", output_dir=cfg.OUTPUT_DIR)

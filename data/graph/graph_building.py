@@ -10,7 +10,7 @@ import re
 
 def build_KG_graph(json_file, exclude_path='', name='pill_data'):
     '''
-    build bipartite graph from extracted prescription json file
+    build bipartite coocurence graph from extracted prescription json file
     '''
     coocurence = {}
     pill_occurence = {}
@@ -69,6 +69,9 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
                     print(f'Excluding {pill}')
                     continue
                 f.write(pill + ',' + diag + ',' + str(weight) + '\n')
+
+def build_size_graph():
+    pass
 
 def generate_pill_edges(pill_diagnose_path):
     pill_edges = pd.read_csv(pill_diagnose_path, names= ["pill","diagnose","weight"])
