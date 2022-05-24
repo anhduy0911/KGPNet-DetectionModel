@@ -66,8 +66,7 @@ class GCN(nn.Module):
         # self.conv4 = pyg_nn.GCNConv(32, 32)
         self.conv5 = pyg_nn.GCNConv(hidden_size * 2, hidden_size)
     
-    def forward(self, data):
-        x, edge_idx, edge_w = data.x, data.edge_index, data.edge_attr
+    def forward(self, x, edge_idx, edge_w):
         x = self.conv1(x, edge_idx, edge_w)
         x = self.tanh(x)
         # x = self.conv2(x, edge_idx, edge_w)
@@ -151,17 +150,22 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         edge_index = []
         edge_weight = []
         
-        pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_edges.csv', header=0)
+        pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_graph.csv', header=0)
         for x, y, w in pill_edge.values:
-            assert(w > 0)
-            edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
-            edge_weight.append(w)
-            edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
-            edge_weight.append(w)
+            if x in mapped_pill_idx and y in mapped_pill_idx:
+                assert(w > 0)
+                edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
+                edge_weight.append(w)
+                edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
+                edge_weight.append(w)
         
         data = Data(x=torch.eye(self.arg['num_classes'], dtype=torch.float32), edge_index=torch.tensor(edge_index).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
         # print(data)
-        return data, torch.tensor(to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze(), dtype=torch.float32)
+        adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
+        # pad 0 to the end of the adj matrix
+        adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
+        adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
+        return data, adj_mat
 
     def warmstart_pseudo_output_heads(self):
         baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
@@ -192,11 +196,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             x = torch.flatten(x, start_dim=1)
         
         pseudo_scores, _ = self.pseudo_detector(x) # N, C
-        pseudo_scores = self.softmax(pseudo_scores)
+        pseudo_scores_sm = self.softmax(pseudo_scores)
 
-        dynamic_adj_mat = torch.matmul(pseudo_scores, self.dense_adj_matrix).matmul(pseudo_scores.t()) # N, N
+        dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
         edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
-        x_context = self.gcn(x, edge_idx, edge_w) # N, H
+        x_context = self.graph_block(x, edge_idx, edge_w) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
 
@@ -224,9 +228,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         )
         _log_classification_stats(scores, gt_classes)
 
-        graph_gtruths = [self.graph_embedding[p.gt_classes] for p in proposals]
-        graph_gtruths = torch.stack(graph_gtruths, dim=0).view(-1, self.hidden_size).contiguous()
-        
         # parse box regression outputs
         if len(proposals):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4

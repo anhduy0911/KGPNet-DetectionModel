@@ -1,6 +1,5 @@
 import config as CFG
-# from models.faster_rcnn import *
-from models.KGPNet_2step import *
+from detectron2.engine import launch
 
 def seed_everything(seed: int):
     import random, os
@@ -19,7 +18,6 @@ def register_dataset():
     '''
     Register a pill dataset.
     '''
-    from detectron2.data import MetadataCatalog
     from detectron2.data.datasets import register_coco_instances
 
     register_coco_instances("pills_train", {}, "data/pills/data_train/instances_train.json", "")
@@ -27,14 +25,21 @@ def register_dataset():
 
 def main(args):
     register_dataset()
+    if args.name.startswith('KGP_e2e'):
+        from models.KGPNet_e2e import train, test
+    elif args.name.startswith('KGP_2step'):
+        from models.KGPNet_2step import train, test
+    elif args.name.startswith('baseline'):
+        from models.faster_rcnn import train, test
+    else:
+        raise NotImplementedError
 
     if args.mode == 'train':
         seed_everything(CFG.seed)
-        train(args)
+        launch(train, args.n_gpus, args=(args,))
     else:
         seed_everything(CFG.seed)
-        test(args)
-
+        launch(test, args.n_gpus, args=(args,))
 
 if __name__ == '__main__':
     import argparse
@@ -58,10 +63,12 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=0.001, metavar='N', help='learning rate')
     parser.add_argument('--n_workers', type=int, default=CFG.n_workers, metavar='N', help='number of workers')
     parser.add_argument('--resume', type=bool, default=False, metavar='N', help='resume training')
+    parser.add_argument('--resume_path', type=str, default='', metavar='N', help='resume training/testing path')
     parser.add_argument('--n_classes', type=int, default=CFG.n_classes, metavar='N', help='number of classes')
     parser.add_argument('--max_iters', type=int, default=CFG.max_iters, metavar='N', help='number of max iteration')
     parser.add_argument('--linking_loss_weight', type=float, default=CFG.linking_loss_weight, metavar='N', help='weight of linking loss')
     parser.add_argument('--train_gcn', type=bool, default=False, metavar='N')
+    parser.add_argument('--n_gpus', type=int, default=1, metavar='N', help='number of gpus used for training')
     
     args = parser.parse_args()
     

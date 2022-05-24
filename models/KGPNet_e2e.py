@@ -44,10 +44,12 @@ def save_model(trainer, name):
     torch.save(state_dict, os.path.join(trainer.cfg.OUTPUT_DIR, name + ".pth"))
 
 def test(args):
+    print(args)
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)
+    cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
@@ -63,7 +65,11 @@ def test(args):
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.4
     cfg.MODEL.KEYPOINT_ON = False
-    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+
+    if args.resume_path == '':
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+    else:
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, args.resume_path)
 
     predictor = DefaultPredictor(cfg)
 

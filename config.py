@@ -11,7 +11,7 @@ warmstart_path = 'logs/baseline/'
 g_warmstart_path = 'logs/graph/'
 # statistics
 n_classes = 96
-n_workers = 4
+n_workers = 8
 seed = 9110
-max_iters = 5000
+max_iters = 80000
 linking_loss_weight = 0.1
