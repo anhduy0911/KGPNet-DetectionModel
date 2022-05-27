@@ -60,15 +60,29 @@ class Attention(nn.Module):
 class GCN(nn.Module):
     def __init__(self, input_dim, hidden_size) -> None:
         super(GCN, self).__init__()
-        self.conv1 = pyg_nn.GCNConv(input_dim, hidden_size * 2)
+        nn_baseblock = nn.Sequential(
+            nn.Linear(input_dim, hidden_size*2),
+            nn.Linear(hidden_size*2, hidden_size*2),
+            nn.BatchNorm1d(hidden_size*2),
+            nn.LeakyReLU()
+        )
+
+        nn_baseblock2 = nn.Sequential(
+            nn.Linear(hidden_size*2, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.LeakyReLU()
+        )
+        self.conv1 = pyg_nn.GINConv(nn_baseblock)
         self.tanh = nn.Tanh()
         # self.conv2 = pyg_nn.GCNConv(32, 32)
         # self.conv3 = pyg_nn.GCNConv(32, 32)
         # self.conv4 = pyg_nn.GCNConv(32, 32)
-        self.conv5 = pyg_nn.GCNConv(hidden_size * 2, hidden_size)
+        self.conv5 = pyg_nn.GINConv(nn_baseblock2)
     
     def forward(self, x, edge_idx, edge_w):
-        x = self.conv1(x, edge_idx, edge_w)
+        # print(x.shape)
+        x = self.conv1(x, edge_idx)
         x = self.tanh(x)
         # x = self.conv2(x, edge_idx, edge_w)
         # x = self.relu(x)
@@ -76,7 +90,7 @@ class GCN(nn.Module):
         # x = self.relu(x)
         # x = self.conv4(x, edge_idx, edge_w)
         # x = self.relu(x)
-        x = self.conv5(x, edge_idx, edge_w)
+        x = self.conv5(x, edge_idx)
 
         return x
 
@@ -164,8 +178,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
+        adj_mat = torch.softmax(adj_mat, dim=-1)
+        adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
+
         return data, adj_mat
 
     def warmstart_pseudo_output_heads(self):
