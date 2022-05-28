@@ -68,6 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--linking_loss_weight', type=float, default=CFG.linking_loss_weight, metavar='N', help='weight of linking loss')
     parser.add_argument('--train_gcn', type=bool, default=False, metavar='N')
     parser.add_argument('--n_gpus', type=int, default=1, metavar='N', help='number of gpus used for training')
+    parser.add_argument('--save_best', type=bool, default=True, metavar='N', help='save best after specified epochs')
     
     args = parser.parse_args()
     

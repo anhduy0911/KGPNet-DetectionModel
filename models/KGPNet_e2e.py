@@ -6,6 +6,7 @@ import os
 import torch
 import json
 from models.modules import KGPStandardROIHeads
+from utils.custom_trainer import CustomTrainer
 
 def train(args):
     cfg = get_cfg()
@@ -21,6 +22,7 @@ def train(args):
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
     cfg.SOLVER.MAX_ITER = args.max_iters
     cfg.SOLVER.STEPS = []        # do not decay learning rate
+    cfg.SOLVER.CHECKPOINT_PERIOD = CFG.cpt_frequency
     cfg.MODEL.DEVICE = 'cuda' if args.cuda else 'cpu'
     cfg.MODEL.ROI_HEADS.NAME = 'KGPStandardROIHeads'
     cfg.MODEL.ROI_HEADS.GRAPH_EBDS_PATH = CFG.graph_ebds_path
@@ -33,7 +35,11 @@ def train(args):
     # NOTE: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.
 
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    trainer = DefaultTrainer(cfg) 
+    if args.save_best:
+        cfg.TEST.EVAL_PERIOD = CFG.test_period
+        trainer = CustomTrainer(cfg)
+    else:
+        trainer = DefaultTrainer(cfg) 
     trainer.resume_or_load(resume=args.resume)
     # save_model(trainer, args.name)
     trainer.train()
@@ -67,7 +73,7 @@ def test(args):
     cfg.MODEL.KEYPOINT_ON = False
 
     if args.resume_path == '':
-        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
     else:
         cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, args.resume_path)
 
