@@ -29,7 +29,7 @@ def train(args):
     cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE = 1024
     cfg.MODEL.ROI_HEADS.PREDICTOR_HIDDEN_SIZE = 128
     cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT = args.linking_loss_weight
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.KEYPOINT_ON = False
     # NOTE: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.

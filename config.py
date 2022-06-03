@@ -17,3 +17,4 @@ max_iters = 30000
 test_period = 5000
 cpt_frequency = 1000
 linking_loss_weight = 0.1
+num_head_gtn = 3

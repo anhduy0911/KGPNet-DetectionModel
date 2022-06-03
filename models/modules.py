@@ -4,6 +4,7 @@ from torch.nn import functional as F
 import torch_geometric.nn as pyg_nn
 from torch_geometric.data import Data
 from torch_geometric.utils import to_dense_adj, dense_to_sparse
+import torch_sparse
 import pandas as pd
 import fvcore.nn.weight_init as weight_init
 from detectron2.config import configurable
@@ -25,6 +26,8 @@ import pickle
 import tqdm
 import matplotlib.pyplot as plt
 from torch.nn.functional import nll_loss
+from models.graph_modules import GCN, GTN
+from data.graph.graph_building import build_size_graph_data
 
 class Attention(nn.Module):
     def __init__(self, hidden_size, method="dot"):
@@ -57,44 +60,6 @@ class Attention(nn.Module):
             
             return self.weight(out).squeeze(-1)
 
-class GCN(nn.Module):
-    def __init__(self, input_dim, hidden_size) -> None:
-        super(GCN, self).__init__()
-        # nn_baseblock = nn.Sequential(
-        #     nn.Linear(input_dim, hidden_size*2),
-        #     nn.Linear(hidden_size*2, hidden_size*2),
-        #     nn.BatchNorm1d(hidden_size*2),
-        #     nn.LeakyReLU()
-        # )
-
-        # nn_baseblock2 = nn.Sequential(
-        #     nn.Linear(hidden_size*2, hidden_size),
-        #     nn.Linear(hidden_size, hidden_size),
-        #     nn.BatchNorm1d(hidden_size),
-        #     nn.LeakyReLU()
-        # )
-        # self.conv1 = pyg_nn.GINConv(nn_baseblock)
-        self.conv1 = pyg_nn.GATv2Conv(input_dim, hidden_size * 2, edge_dim=1)
-        self.tanh = nn.Tanh()
-        # self.conv2 = pyg_nn.GCNConv(32, 32)
-        # self.conv3 = pyg_nn.GCNConv(32, 32)
-        # self.conv4 = pyg_nn.GCNConv(32, 32)
-        # self.conv5 = pyg_nn.GINConv(nn_baseblock2)
-        self.conv5 = pyg_nn.GATv2Conv(hidden_size * 2, hidden_size, edge_dim=1)
-    
-    def forward(self, x, edge_idx, edge_w):
-        # print(x.shape)
-        x = self.conv1(x, edge_idx, edge_w)
-        x = self.tanh(x)
-        # x = self.conv2(x, edge_idx, edge_w)
-        # x = self.relu(x)
-        # x = self.conv3(x, edge_idx, edge_w)
-        # x = self.relu(x)
-        # x = self.conv4(x, edge_idx, edge_w)
-        # x = self.relu(x)
-        x = self.conv5(x, edge_idx, edge_w)
-        return x
-
 class KGPNetOutputLayers(FastRCNNOutputLayers):
     """
     Layers for predicting Fast R-CNN outputs:
@@ -113,24 +78,26 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.hidden_size = hidden_size = kwargs["hidden_size"]
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
+        self.roi_batch = kwargs['roi_batch']
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
-
+        
         kwargs.pop("device")
         kwargs.pop("hidden_size")
-        kwargs.pop("graph_ebd_path")
-        kwargs.pop("train_gcn")
+        kwargs.pop("roi_batch")
+
         super().__init__(**kwargs)
         self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1}
         self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
         # self.warmstart_pseudo_output_heads()
-
-        _, self.dense_adj_matrix = self.build_graph_data()
-        self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
+        # print(f'ROI BATCH: {self.roi_batch}')
+        self.dense_adj_matrix = self.build_graph_data()
+        # self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
         
         # the graph block for aggregating the context embedding
-        self.graph_block = GCN(roi_features, hidden_size)
+        # self.graph_block = GCN(roi_features, hidden_size)
+        self.graph_block = GTN(len(self.dense_adj_matrix), CFG.num_head_gtn, roi_features, self.hidden_size, self.roi_batch, 2)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
         
@@ -144,11 +111,9 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
     def from_config(cls, cfg):
         return {
             "device": cfg.MODEL.DEVICE,
-            "train_gcn": cfg.MODEL.TRAIN_GCN,
             "input_shape": cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE,
             "box2box_transform": Box2BoxTransform(weights=cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS),
             # fmt: off
-            "graph_ebd_path": cfg.MODEL.ROI_HEADS.GRAPH_EBDS_PATH,
             "hidden_size": cfg.MODEL.ROI_HEADS.PREDICTOR_HIDDEN_SIZE,
             "num_classes"           : cfg.MODEL.ROI_HEADS.NUM_CLASSES,
             "cls_agnostic_bbox_reg" : cfg.MODEL.ROI_BOX_HEAD.CLS_AGNOSTIC_BBOX_REG,
@@ -157,6 +122,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "test_nms_thresh"       : cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
             "test_topk_per_image"   : cfg.TEST.DETECTIONS_PER_IMAGE,
             "box_reg_loss_type"     : cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_TYPE,
+            "roi_batch"             : cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE * cfg.SOLVER.IMS_PER_BATCH
             # "loss_weight"           : {"loss_box_reg": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT, "loss_linking": cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT},
             # fmt: on
         }
@@ -180,11 +146,29 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
         adj_mat = torch.softmax(adj_mat, dim=-1)
-        adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
+        # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
+        
+        A = []
+        # adj_mat = adj_mat.to_sparse().to(self.device)
+        adj_mat = adj_mat.to(self.device)
+        # print(adj_mat.shape)
+        # A.append((adj_mat.indices(), adj_mat.values()))
+        A.append(adj_mat)
+        # size_mat = build_size_graph_data().to_sparse().to(self.device)
+        size_mat = build_size_graph_data().to(self.device)
+        # print(size_mat.shape)
+        # A.append((size_mat.indices(), size_mat.values()))
+        A.append(size_mat)
 
-        return data, adj_mat
+        # edge_tmp = torch.stack((torch.arange(0,self.num_classes + 1),torch.arange(0,self.num_classes + 1))).type(torch.LongTensor).to(self.device)
+        # value_tmp = torch.ones(self.num_classes + 1).type(torch.FloatTensor).to(self.device)
+        # A.append((edge_tmp,value_tmp)) # Add self loop adj matrix
+        self_loop_mat = torch.eye(self.arg['num_classes'] + 1, dtype=torch.float32).to(self.device)
+        A.append(self_loop_mat)
+
+        return A
 
     def warmstart_pseudo_output_heads(self):
         baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
@@ -197,7 +181,34 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         for param in self.pseudo_detector.parameters():
             param.requires_grad = False
-        
+    
+    def extract_p_A(self, A, p_score):
+        # print(p_score.shape)
+        # p_score_sp = p_score.to_sparse()
+        # N, C = p_score_sp.shape
+        # p_score_sp_t = p_score_sp.transpose(0,1).coalesce()
+        # # print(p_score_sp_t.shape)
+        # p_score_idx, p_score_v = p_score_sp.indices(), p_score_sp.values()
+        # p_score_idx_t, p_score_v_t = p_score_sp_t.indices(), p_score_sp_t.values()
+        # p_A = []
+        # for i in range(len(A)):
+        #     edges, values = torch_sparse.spspmm(p_score_idx, p_score_v, A[i][0], A[i][1], N, C, self.hidden_size)
+            
+        #     edges, values = torch_sparse.spspmm(edges, values, p_score_idx_t, p_score_v_t, N, self.hidden_size, N)
+
+        #     print(edges.shape)
+        #     p_A.append((edges, values))
+
+        p_A = []
+        for i in range(len(A)):
+            Ai = A[i]
+            softmap_Ai = torch.matmul(p_score, Ai).matmul(p_score.t()).to_sparse()
+            # print(softmap_Ai.shape)
+            edges, values = softmap_Ai.indices(), softmap_Ai.values()
+            p_A.append((edges, values))
+
+        return p_A
+
     def forward(self, x):
         """
         Args:
@@ -216,10 +227,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         
         pseudo_scores, _ = self.pseudo_detector(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
-        dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
-        edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
+        # dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
+        dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
+        # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
-        x_context = self.graph_block(x, edge_idx, edge_w.unsqueeze(1)) # N, H
+        x_context, _ = self.graph_block(dynamic_adj_mat, x) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
 

@@ -1,10 +1,3 @@
 */__pycache__
-data/pills/all_test
-data/pills/all_train
-data/pills/base_test
-data/pills/base_train
-data/pills/data_train
-data/pills/data_test
-data/pills/pill_cropped
-data/pills/error_list.csv
+data/pills
 logs/
