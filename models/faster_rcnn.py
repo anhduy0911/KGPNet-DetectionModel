@@ -5,6 +5,7 @@ import config as CFG
 import os
 import torch
 import json
+from utils.custom_trainer import CustomTrainer
 
 def train(args):
     cfg = get_cfg()
@@ -18,13 +19,19 @@ def train(args):
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
     cfg.SOLVER.MAX_ITER = args.max_iters
     cfg.SOLVER.STEPS = []        # do not decay learning rate
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
+    cfg.SOLVER.CHECKPOINT_PERIOD = CFG.cpt_frequency
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.KEYPOINT_ON = False
     # NOTE: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.
 
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
-    trainer = DefaultTrainer(cfg) 
+    if args.save_best:
+        cfg.TEST.EVAL_PERIOD = CFG.test_period
+        trainer = CustomTrainer(cfg)
+    else:
+        trainer = DefaultTrainer(cfg) 
+
     trainer.resume_or_load(resume=args.resume)
     # save_model(trainer, args.name)
     trainer.train()
@@ -40,7 +47,6 @@ def test(args):
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
-    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
     cfg.SOLVER.MAX_ITER = 300    # 300 iterations seems good enough for this toy dataset; you will need to train longer for a practical dataset
@@ -50,6 +56,11 @@ def test(args):
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.4
     cfg.MODEL.KEYPOINT_ON = False
 
+    if args.resume_path == '':
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+    else:
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, args.resume_path)
+        
     predictor = DefaultPredictor(cfg)
 
     from detectron2.evaluation import COCOEvaluator, inference_on_dataset

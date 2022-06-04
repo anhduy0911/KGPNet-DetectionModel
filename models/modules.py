@@ -60,32 +60,30 @@ class Attention(nn.Module):
 class GCN(nn.Module):
     def __init__(self, input_dim, hidden_size) -> None:
         super(GCN, self).__init__()
-        # nn_baseblock = nn.Sequential(
-        #     nn.Linear(input_dim, hidden_size*2),
-        #     nn.Linear(hidden_size*2, hidden_size*2),
-        #     nn.BatchNorm1d(hidden_size*2),
-        #     nn.LeakyReLU()
-        # )
+        nn_baseblock = nn.Sequential(
+            nn.Linear(input_dim, hidden_size*2),
+            nn.Linear(hidden_size*2, hidden_size*2),
+            nn.BatchNorm1d(hidden_size*2),
+            nn.LeakyReLU()
+        )
 
-        # nn_baseblock2 = nn.Sequential(
-        #     nn.Linear(hidden_size*2, hidden_size),
-        #     nn.Linear(hidden_size, hidden_size),
-        #     nn.BatchNorm1d(hidden_size),
-        #     nn.LeakyReLU()
-        # )
-        # self.conv1 = pyg_nn.GINConv(nn_baseblock)
-        self.conv1 = pyg_nn.GATv2Conv(input_dim, hidden_size * 2, edge_dim=1)
-        self.tanh = nn.Tanh()
+        nn_baseblock2 = nn.Sequential(
+            nn.Linear(hidden_size*2, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.BatchNorm1d(hidden_size),
+            nn.LeakyReLU()
+        )
+        self.conv1 = pyg_nn.GINEConv(nn_baseblock, edge_dim=1)
+        # self.conv1 = pyg_nn.GATv2Conv(input_dim, hidden_size * 2, edge_dim=1)
         # self.conv2 = pyg_nn.GCNConv(32, 32)
         # self.conv3 = pyg_nn.GCNConv(32, 32)
         # self.conv4 = pyg_nn.GCNConv(32, 32)
-        # self.conv5 = pyg_nn.GINConv(nn_baseblock2)
-        self.conv5 = pyg_nn.GATv2Conv(hidden_size * 2, hidden_size, edge_dim=1)
+        self.conv5 = pyg_nn.GINEConv(nn_baseblock2, edge_dim=1)
+        # self.conv5 = pyg_nn.GATv2Conv(hidden_size * 2, hidden_size, edge_dim=1)
     
     def forward(self, x, edge_idx, edge_w):
         # print(x.shape)
         x = self.conv1(x, edge_idx, edge_w)
-        x = self.tanh(x)
         # x = self.conv2(x, edge_idx, edge_w)
         # x = self.relu(x)
         # x = self.conv3(x, edge_idx, edge_w)
@@ -122,18 +120,23 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("graph_ebd_path")
         kwargs.pop("train_gcn")
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1}
-        self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0}
+        self.p_cls_score= nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
 
         _, self.dense_adj_matrix = self.build_graph_data()
         self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
+        self.dense_adj_matrix.requires_grad = False
         
         # the graph block for aggregating the context embedding
-        self.graph_block = GCN(roi_features, hidden_size)
+        self.graph_block = GCN(roi_features + hidden_size, hidden_size)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
-        
+        self.trans_context = nn.Sequential(
+            nn.BatchNorm1d(hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size)
+        )
         self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
         num_bbox_reg_classes = 1 if kwargs['cls_agnostic_bbox_reg'] else num_classes
         box_dim = len( kwargs['box2box_transform'].weights)
@@ -181,6 +184,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # pad 0 to the end of the adj matrix
         adj_mat = torch.softmax(adj_mat, dim=-1)
         adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
+        adj_mat = adj_mat + torch.eye(adj_mat.shape[0], dtype=torch.float32, device=adj_mat.device) # add self-loop
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
 
@@ -214,19 +218,22 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         
-        pseudo_scores, _ = self.pseudo_detector(x) # N, C
+        pseudo_scores = self.p_cls_score(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
         dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
         edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
-        x_context = self.graph_block(x, edge_idx, edge_w.unsqueeze(1)) # N, H
+        weight_cls = self.cls_score.weight
+        weight_sm = torch.mm(pseudo_scores_sm, weight_cls) # N, D
+        x_context = self.graph_block(weight_sm, edge_idx, edge_w.unsqueeze(1)) # N, H
+        x_context = self.trans_context(x_context)
         
         x_enhanced = torch.cat([x, x_context], dim=1)
 
-        proposal_deltas = self.bbox_pred(x)
+        # proposal_deltas = self.bbox_pred(x)
         scores = self.cls_score(x_enhanced)
 
-        # proposal_deltas = self.bbox_pred(x)
+        proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
         # print(scores)
         return scores, proposal_deltas, pseudo_scores_sm
