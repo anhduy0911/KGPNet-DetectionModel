@@ -70,9 +70,12 @@ class GTN(nn.Module):
         self.linear2 = nn.Linear(self.w_out, self.w_out)
 
     def normalization(self, H):
+        '''
+        H - dense matrix of shape K_, N, N
+        '''
         norm_H = []
         for i in range(self.num_channels):
-            edge, value=H[i]
+            edge, value=H[i].to_sparse().indices(), H[i].to_sparse().values()
             edge, value = remove_self_loops(edge, value)
             deg_row, deg_col = self.norm(edge, self.num_nodes, value)
             value = deg_col * value
@@ -133,27 +136,31 @@ class GTLayer(nn.Module):
             self.conv1 = GTConv(in_channels, out_channels, num_nodes)
     
     def forward(self, A, H_=None):
-        print(self.conv1.weight)
+        # print(self.conv1.weight)
         if self.first == True:
-            result_A = self.conv1(A)
+            result_A = self.conv1(A) 
             result_B = self.conv2(A)                
             # W = [(F.softmax(self.conv1.weight, dim=1)),(F.softmax(self.conv2.weight, dim=1))]
         else:
             result_A = H_
             result_B = self.conv1(A)
             # W = [(F.softmax(self.conv1.weight, dim=1))]
-        H = []
-        for i in range(len(result_A)):
-            a_edge, a_value = result_A[i]
-            b_edge, b_value = result_B[i]
+        # H = []
+
+        H = torch.bmm(result_A, result_B) # K_, N, N
+        # print(H)
+        # for i in range(len(result_A)):
+        #     a_edge, a_value = result_A[i]
+        #     b_edge, b_value = result_B[i]
             
-            print(f'a value: {a_value}')
-            print(f'b value: {b_value}')
-            # edges, values = torch_sparse_old.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
-            torch.mm
-            edges, values = torch_sparse.spmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
-            print(values)
-            H.append((edges, values))
+        #     print(f'a value: {a_value}')
+        #     print(f'b value: {b_value}')
+        #     # edges, values = torch_sparse_old.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
+        #     torch.mm
+        #     edges, values = torch_sparse.spmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
+        #     print(values)
+        #     H.append((edges, values))
+        
         return H
 
 class GTConv(nn.Module):
@@ -175,19 +182,12 @@ class GTConv(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, A):
-        filter = F.softmax(self.weight, dim=1)
-        num_channels = filter.shape[0]
-        results = []
-        for i in range(num_channels):
-            for j, (edge_index,edge_value) in enumerate(A):
-                # print(edge_value)
-                if j == 0:
-                    total_edge_index = edge_index
-                    total_edge_value = edge_value*filter[i][j]
-                else:
-                    total_edge_index = torch.cat((total_edge_index, edge_index), dim=1)
-                    total_edge_value = torch.cat((total_edge_value, edge_value*filter[i][j]))
-            index, value = torch_sparse.coalesce(total_edge_index, total_edge_value, m=self.num_nodes, n=self.num_nodes)
-            results.append((index, value))
+        '''
+        A - dense matrices of multiple adj matrices - K, N, N
+        '''
+        _, N, N = A.shape
+        filter = F.softmax(self.weight, dim=1) # K_, K
+        retransformed = torch.matmul(filter, A.flatten(start_dim=1)) # K_, N*N
+        retransformed = retransformed.view(-1, N, N) # K_, N, N
             # print(value)
-        return results
+        return retransformed

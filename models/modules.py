@@ -26,7 +26,8 @@ import pickle
 import tqdm
 import matplotlib.pyplot as plt
 from torch.nn.functional import nll_loss
-from models.graph_modules import GCN, GTN
+# from models.graph_modules import GCN, GTN
+from models.graph_modules_dense import GCN, GTN
 from data.graph.graph_building import build_size_graph_data
 
 class Attention(nn.Module):
@@ -166,7 +167,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self_loop_mat = torch.eye(self.arg['num_classes'] + 1, dtype=torch.float32).to(self.device)
         A.append(self_loop_mat)
 
-        return A
+        return torch.stack(A, dim=0)
 
     def warmstart_pseudo_output_heads(self):
         baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
@@ -226,8 +227,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         
         pseudo_scores = self.p_cls_score(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
-        # dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
-        dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
+        dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
+        # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
         x_context = self.graph_block(dynamic_adj_mat, x) # N, H
