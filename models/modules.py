@@ -72,13 +72,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
     """
     @configurable
     def __init__(self, **kwargs):
-        for arg in kwargs:
-            print(arg)
-
         self.hidden_size = hidden_size = kwargs["hidden_size"]
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
         self.roi_batch = kwargs['roi_batch']
+        # print(f'ROI BATCH: {self.roi_batch}')
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
@@ -122,7 +120,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "test_nms_thresh"       : cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
             "test_topk_per_image"   : cfg.TEST.DETECTIONS_PER_IMAGE,
             "box_reg_loss_type"     : cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_TYPE,
-            "roi_batch"             : cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE * cfg.SOLVER.IMS_PER_BATCH
+            "roi_batch"             : cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE * cfg.SOLVER.IMS_PER_BATCH if cfg.TRAIN else cfg.MODEL.RPN.POST_NMS_TOPK_TEST
             # "loss_weight"           : {"loss_box_reg": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT, "loss_linking": cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT},
             # fmt: on
         }
@@ -222,6 +220,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             Second tensor: bounding box regression deltas for each box. Shape is shape (N,Kx4),
             or (N,4) for class-agnostic regression.
         """
+
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         

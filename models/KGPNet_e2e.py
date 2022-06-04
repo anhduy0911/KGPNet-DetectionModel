@@ -11,6 +11,7 @@ from utils.custom_trainer import CustomTrainer
 def train(args):
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.TRAIN = True
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATASETS.TRAIN = ("pills_train",)
@@ -53,13 +54,12 @@ def test(args):
     print(args)
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.TRAIN = False
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
-    cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
-    cfg.SOLVER.MAX_ITER = 300    # 300 iterations seems good enough for this toy dataset; you will need to train longer for a practical dataset
     cfg.SOLVER.STEPS = []        # do not decay learning rate
     cfg.MODEL.DEVICE = 'cuda' if args.cuda else 'cpu'
     cfg.MODEL.ROI_HEADS.NAME = 'KGPStandardROIHeads'
@@ -67,9 +67,10 @@ def test(args):
     cfg.MODEL.ROI_HEADS.GRAPH_EBDS_PATH = CFG.graph_ebds_path
     cfg.MODEL.ROI_HEADS.PREDICTOR_HIDDEN_SIZE = 128
     cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT = args.linking_loss_weight
-    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
     cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.4
+
     cfg.MODEL.KEYPOINT_ON = False
 
     if args.resume_path == '':
@@ -86,24 +87,26 @@ def test(args):
     import cv2
     import matplotlib.pyplot as plt
 
-    # visualization
-    test_dict = DatasetCatalog.get("pills_test")
-    d = test_dict[5]
-    im = cv2.imread(d["file_name"])
-    outputs = predictor(im)
-    print(f'gtruth: {d["annotations"]}')
-    print(f'predict: {outputs["instances"]}')
-    v = Visualizer(im[:, :, ::-1],
-                    metadata=d,
-                   #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
-    )
-    out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
-    plt.imshow(out.get_image())
-    plt.savefig(f'eval_{args.name}.png', dpi=300)
+    # # visualization
+    # test_dict = DatasetCatalog.get("pills_test")
+    # d = test_dict[5]
+    # im = cv2.imread(d["file_name"])
+    # outputs = predictor(im)
+    # print(f'gtruth: {d["annotations"]}')
+    # print(f'predict: {outputs["instances"]}')
+    # v = Visualizer(im[:, :, ::-1],
+    #                 metadata=d,
+    #                #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+    # )
+    # out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+    # plt.imshow(out.get_image())
+    # plt.savefig(f'eval_{args.name}.png', dpi=300)
     
     # # evaluation
-    evaluator = COCOEvaluator("pills_test", output_dir=cfg.OUTPUT_DIR)
+    evaluator = COCOEvaluator("pills_test", output_dir=cfg.OUTPUT_DIR, max_dets_per_image=2000)
     val_loader = build_detection_test_loader(cfg, "pills_test")
+    # item = next(iter(val_loader))
+    # print(item)
     result = inference_on_dataset(predictor.model, val_loader, evaluator)
     print(result)
     with open(cfg.OUTPUT_DIR + "/results.json", "w") as f:
