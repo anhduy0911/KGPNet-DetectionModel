@@ -74,7 +74,7 @@ class GTN(nn.Module):
         for i in range(self.num_channels):
             edge, value=H[i]
             edge, value = remove_self_loops(edge, value)
-            deg_row, deg_col = self.norm(edge.detach(), self.num_nodes, value)
+            deg_row, deg_col = self.norm(edge, self.num_nodes, value)
             value = deg_col * value
             norm_H.append((edge, value))
         return norm_H
@@ -94,27 +94,29 @@ class GTN(nn.Module):
         return deg_inv_sqrt[row], deg_inv_sqrt[col]
 
     def forward(self, A, X):
-        Ws = []
+        # Ws = []
         for i in range(self.num_layers):
             if i == 0:
-                H, W = self.layers[i](A)
+                # H, W = self.layers[i](A)
+                H = self.layers[i](A)
             else:                
-                H, W = self.layers[i](A, H)
+                # H, W = self.layers[i](A, H)
+                H = self.layers[i](A, H)
             H = self.normalization(H)
-            Ws.append(W)
+            # Ws.append(W)
         for i in range(self.num_channels):
             if i==0:
                 edge_index, edge_weight = H[i][0], H[i][1]
-                X_ = self.gcn(X,edge_index=edge_index.detach(), edge_weight=edge_weight)
+                X_ = self.gcn(X,edge_index=edge_index, edge_weight=edge_weight)
                 X_ = F.relu(X_)
             else:
                 edge_index, edge_weight = H[i][0], H[i][1]
-                X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index.detach(), edge_weight=edge_weight))), dim=1)
+                X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index, edge_weight=edge_weight))), dim=1)
         X_ = self.linear1(X_)
         X_ = F.relu(X_)
         y = self.linear2(X_)
 
-        return y, Ws
+        return y
 
 class GTLayer(nn.Module):
     
@@ -134,11 +136,11 @@ class GTLayer(nn.Module):
         if self.first == True:
             result_A = self.conv1(A)
             result_B = self.conv2(A)                
-            W = [(F.softmax(self.conv1.weight, dim=1)).detach(),(F.softmax(self.conv2.weight, dim=1)).detach()]
+            # W = [(F.softmax(self.conv1.weight, dim=1)),(F.softmax(self.conv2.weight, dim=1))]
         else:
             result_A = H_
             result_B = self.conv1(A)
-            W = [(F.softmax(self.conv1.weight, dim=1)).detach()]
+            # W = [(F.softmax(self.conv1.weight, dim=1))]
         H = []
         for i in range(len(result_A)):
             a_edge, a_value = result_A[i]
@@ -147,7 +149,7 @@ class GTLayer(nn.Module):
             # edges, values = torch_sparse_old.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
             edges, values = torch_sparse.spspmm(a_edge, a_value, b_edge, b_value, self.num_nodes, self.num_nodes, self.num_nodes)
             H.append((edges, values))
-        return H, W
+        return H
 
 class GTConv(nn.Module):
     
@@ -179,6 +181,6 @@ class GTConv(nn.Module):
                 else:
                     total_edge_index = torch.cat((total_edge_index, edge_index), dim=1)
                     total_edge_value = torch.cat((total_edge_value, edge_value*filter[i][j]))
-            index, value = torch_sparse.coalesce(total_edge_index.detach(), total_edge_value, m=self.num_nodes, n=self.num_nodes)
+            index, value = torch_sparse.coalesce(total_edge_index, total_edge_value, m=self.num_nodes, n=self.num_nodes)
             results.append((index, value))
         return results

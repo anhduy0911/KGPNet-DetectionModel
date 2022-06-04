@@ -87,7 +87,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         super().__init__(**kwargs)
         self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1}
-        self.pseudo_detector = FastRCNNOutputLayers(**kwargs)
+        self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
         self.dense_adj_matrix = self.build_graph_data()
@@ -95,7 +95,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         
         # the graph block for aggregating the context embedding
         # self.graph_block = GCN(roi_features, hidden_size)
-        self.graph_block = GTN(len(self.dense_adj_matrix), CFG.num_head_gtn, roi_features, self.hidden_size, self.roi_batch, 2)
+        self.graph_block = GTN(len(self.dense_adj_matrix), CFG.num_head_gtn, roi_features, self.hidden_size, self.roi_batch, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
         
@@ -224,13 +224,13 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         
-        pseudo_scores, _ = self.pseudo_detector(x) # N, C
+        pseudo_scores = self.p_cls_score(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
         # dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
         dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
-        x_context, _ = self.graph_block(dynamic_adj_mat, x) # N, H
+        x_context = self.graph_block(dynamic_adj_mat, x) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
 

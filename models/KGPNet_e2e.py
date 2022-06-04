@@ -87,26 +87,24 @@ def test(args):
     import cv2
     import matplotlib.pyplot as plt
 
-    # # visualization
-    # test_dict = DatasetCatalog.get("pills_test")
-    # d = test_dict[5]
-    # im = cv2.imread(d["file_name"])
-    # outputs = predictor(im)
-    # print(f'gtruth: {d["annotations"]}')
-    # print(f'predict: {outputs["instances"]}')
-    # v = Visualizer(im[:, :, ::-1],
-    #                 metadata=d,
-    #                #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
-    # )
-    # out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
-    # plt.imshow(out.get_image())
-    # plt.savefig(f'eval_{args.name}.png', dpi=300)
+    # visualization
+    test_dict = DatasetCatalog.get("pills_test")
+    d = test_dict[5]
+    im = cv2.imread(d["file_name"])
+    outputs = predictor(im)
+    print(f'gtruth: {d["annotations"]}')
+    print(f'predict: {outputs["instances"]}')
+    v = Visualizer(im[:, :, ::-1],
+                    metadata=d,
+                   #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+    )
+    out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+    plt.imshow(out.get_image())
+    plt.savefig(f'eval_{args.name}.png', dpi=300)
     
-    # # evaluation
+    # evaluation
     evaluator = COCOEvaluator("pills_test", output_dir=cfg.OUTPUT_DIR, max_dets_per_image=2000)
     val_loader = build_detection_test_loader(cfg, "pills_test")
-    # item = next(iter(val_loader))
-    # print(item)
     result = inference_on_dataset(predictor.model, val_loader, evaluator)
     print(result)
     with open(cfg.OUTPUT_DIR + "/results.json", "w") as f:
