@@ -49,20 +49,19 @@ class GTN(nn.Module):
     '''
     Graph Transformer Network
     '''
-    def __init__(self, num_edge, num_channels, w_in, w_out, num_nodes, num_layers):
+    def __init__(self, num_edge, num_channels, w_in, w_out, num_layers):
         super(GTN, self).__init__()
         self.num_edge = num_edge
         self.num_channels = num_channels
-        self.num_nodes = num_nodes
         self.w_in = w_in
         self.w_out = w_out
         self.num_layers = num_layers
         layers = []
         for i in range(num_layers):
             if i == 0:
-                layers.append(GTLayer(num_edge, num_channels, num_nodes, first=True))
+                layers.append(GTLayer(num_edge, num_channels, first=True))
             else:
-                layers.append(GTLayer(num_edge, num_channels, num_nodes, first=False))
+                layers.append(GTLayer(num_edge, num_channels, first=False))
         self.layers = nn.ModuleList(layers)
         # self.loss = nn.CrossEntropyLoss()
         self.gcn = pyg_nn.GCNConv(in_channels=self.w_in, out_channels=w_out)
@@ -74,10 +73,12 @@ class GTN(nn.Module):
         H - dense matrix of shape K_, N, N
         '''
         norm_H = []
+        _, n_node,_ = H.shape
         for i in range(self.num_channels):
-            edge, value=H[i].to_sparse().indices(), H[i].to_sparse().values()
+            H_i_sparse = H[i].to_sparse()
+            edge, value= H_i_sparse.indices(), H_i_sparse.values()
             edge, value = remove_self_loops(edge, value)
-            deg_row, deg_col = self.norm(edge, self.num_nodes, value)
+            deg_row, deg_col = self.norm(edge, n_node, value)
             value = deg_col * value
             norm_H.append((edge, value))
         return norm_H
@@ -87,6 +88,7 @@ class GTN(nn.Module):
             edge_weight = torch.ones((edge_index.size(1), ),
                                     dtype=dtype,
                                     device=edge_index.device)
+        # _, n_nodes = edge_index.shape
         edge_weight = edge_weight.view(-1)
         assert edge_weight.size(0) == edge_index.size(1)
         row, col = edge_index
@@ -123,20 +125,19 @@ class GTN(nn.Module):
 
 class GTLayer(nn.Module):
     
-    def __init__(self, in_channels, out_channels, num_nodes, first=True):
+    def __init__(self, in_channels, out_channels, first=True):
         super(GTLayer, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.first = first
-        self.num_nodes = num_nodes
         if self.first == True:
-            self.conv1 = GTConv(in_channels, out_channels, num_nodes)
-            self.conv2 = GTConv(in_channels, out_channels, num_nodes)
+            self.conv1 = GTConv(in_channels, out_channels)
+            self.conv2 = GTConv(in_channels, out_channels)
         else:
-            self.conv1 = GTConv(in_channels, out_channels, num_nodes)
-    
+            self.conv1 = GTConv(in_channels, out_channels)
+        # self.conv1.weight.register_hook(lambda x: print('grad accumulated in weight'))
     def forward(self, A, H_=None):
-        # print(self.conv1.weight)
+        # print(self.conv1.weight.grad)
         if self.first == True:
             result_A = self.conv1(A) 
             result_B = self.conv2(A)                
@@ -165,13 +166,12 @@ class GTLayer(nn.Module):
 
 class GTConv(nn.Module):
     
-    def __init__(self, in_channels, out_channels, num_nodes):
+    def __init__(self, in_channels, out_channels):
         super(GTConv, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.weight = nn.Parameter(torch.Tensor(out_channels,in_channels))
         self.bias = None
-        self.num_nodes = num_nodes
         self.reset_parameters()
     def reset_parameters(self):
         n = self.in_channels
@@ -187,7 +187,9 @@ class GTConv(nn.Module):
         '''
         _, N, N = A.shape
         filter = F.softmax(self.weight, dim=1) # K_, K
+        # print(filter)
         retransformed = torch.matmul(filter, A.flatten(start_dim=1)) # K_, N*N
         retransformed = retransformed.view(-1, N, N) # K_, N, N
+        
             # print(value)
         return retransformed

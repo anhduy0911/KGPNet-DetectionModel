@@ -237,7 +237,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         proposal_deltas = self.bbox_pred(x)
         scores = self.cls_score(x_enhanced)
-
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
         # print(scores)

@@ -74,7 +74,7 @@ def test(args):
     cfg.MODEL.KEYPOINT_ON = False
 
     if args.resume_path == '':
-        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_best.pth")
+        cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_last.pth")
     else:
         cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, args.resume_path)
 
