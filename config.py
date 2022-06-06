@@ -18,3 +18,4 @@ test_period = 10000
 cpt_frequency = 5000
 linking_loss_weight = 0.1
 num_head_gtn = 5
+topk_neighbor = 10

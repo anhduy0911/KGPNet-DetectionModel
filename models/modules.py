@@ -237,7 +237,12 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         z = self.fc1(x)
         eps = torch.mm(z, z.t())
+        vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
+        # print(topk)
+        eps.zero_()
+        eps[torch.arange(eps.size(0))[:, None], indices] = vals
         dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
+        import pdb; pdb.set_trace()
         # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
