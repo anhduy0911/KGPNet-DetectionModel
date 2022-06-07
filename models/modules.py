@@ -150,7 +150,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.softmax(adj_mat, dim=-1)
+        adj_mat = torch.sigmoid(adj_mat)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
@@ -242,7 +242,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         eps.zero_()
         eps[torch.arange(eps.size(0))[:, None], indices] = vals
         dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
-        import pdb; pdb.set_trace()
         # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
