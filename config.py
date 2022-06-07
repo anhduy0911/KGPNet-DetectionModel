@@ -11,11 +11,11 @@ warmstart_path = 'logs/baseline/'
 g_warmstart_path = 'logs/graph/'
 # statistics
 n_classes = 96
-n_workers = 8
+n_workers = 1
 seed = 9110
-max_iters = 80000
+max_iters = 40000
 test_period = 10000
-cpt_frequency = 5000
+cpt_frequency = 1000
 linking_loss_weight = 0.1
 num_head_gtn = 5
 topk_neighbor = 10
