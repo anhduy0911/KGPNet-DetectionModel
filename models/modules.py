@@ -150,7 +150,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.softmax(adj_mat, dim=-1)
+        adj_mat = torch.sigmoid(adj_mat)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
@@ -174,45 +174,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         A.append(self_loop_mat)
 
         return torch.stack(A, dim=0)
-
-    def warmstart_pseudo_output_heads(self):
-        baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
-        # print(baseline_model['model'].keys())
-
-        self.pseudo_detector.bbox_pred.weight.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.weight']
-        self.pseudo_detector.bbox_pred.bias.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.bias']
-        self.pseudo_detector.cls_score.weight.data = baseline_model['model']['roi_heads.box_predictor.cls_score.weight']
-        self.pseudo_detector.cls_score.bias.data = baseline_model['model']['roi_heads.box_predictor.cls_score.bias']
-
-        for param in self.pseudo_detector.parameters():
-            param.requires_grad = False
-    
-    def extract_p_A(self, A, p_score):
-        # print(p_score.shape)
-        # p_score_sp = p_score.to_sparse()
-        # N, C = p_score_sp.shape
-        # p_score_sp_t = p_score_sp.transpose(0,1).coalesce()
-        # # print(p_score_sp_t.shape)
-        # p_score_idx, p_score_v = p_score_sp.indices(), p_score_sp.values()
-        # p_score_idx_t, p_score_v_t = p_score_sp_t.indices(), p_score_sp_t.values()
-        # p_A = []
-        # for i in range(len(A)):
-        #     edges, values = torch_sparse.spspmm(p_score_idx, p_score_v, A[i][0], A[i][1], N, C, self.hidden_size)
-            
-        #     edges, values = torch_sparse.spspmm(edges, values, p_score_idx_t, p_score_v_t, N, self.hidden_size, N)
-
-        #     print(edges.shape)
-        #     p_A.append((edges, values))
-
-        p_A = []
-        for i in range(len(A)):
-            Ai = A[i]
-            softmap_Ai = torch.matmul(p_score, Ai).matmul(p_score.t()).to_sparse()
-            # print(softmap_Ai.shape)
-            edges, values = softmap_Ai.indices(), softmap_Ai.values()
-            p_A.append((edges, values))
-
-        return p_A
 
     def forward(self, x):
         """
@@ -242,7 +203,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         eps.zero_()
         eps[torch.arange(eps.size(0))[:, None], indices] = vals
         dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)

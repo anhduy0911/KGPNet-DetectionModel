@@ -10,14 +10,15 @@ from utils.custom_trainer import CustomTrainer
 
 def train(args):
     cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_C4_3x.yaml"))
+    # import pdb; pdb.set_trace()
     cfg.TRAIN = True
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATASETS.TRAIN = ("pills_train",)
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_C4_3x.yaml")  # Let training initialize from model zoo
     # cfg.MODEL.WEIGHTS = os.path.join(CFG.warmstart_path, "model_final.pth")
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
@@ -32,7 +33,10 @@ def train(args):
     cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT = args.linking_loss_weight
     cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
+    cfg.MODEL.ROI_BOX_HEAD.NAME = 'FastRCNNConvFCHead'
+    cfg.MODEL.ROI_BOX_HEAD.NUM_FC = 2
     cfg.MODEL.KEYPOINT_ON = False
+    cfg.MODEL.MASK_ON = False
     # NOTE: this config means the number of classes, but a few popular unofficial tutorials incorrect uses num_classes+1 here.
 
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
@@ -53,7 +57,7 @@ def save_model(trainer, name):
 def test(args):
     print(args)
     cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_C4_3x.yaml"))
     cfg.TRAIN = False
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)
