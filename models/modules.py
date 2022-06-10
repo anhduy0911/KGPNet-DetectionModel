@@ -20,7 +20,8 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, graph_embedding_loss
+from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, adj_based_loss
+from utils.util import create_loss_mask
 import config as CFG
 import pickle
 import tqdm
@@ -29,7 +30,7 @@ from torch.nn.functional import nll_loss
 # from models.graph_modules import GCN, GTN
 from models.graph_modules_dense import GCN, GTN
 from data.graph.graph_building import build_size_graph_data
-
+import os
 class Attention(nn.Module):
     def __init__(self, hidden_size, method="dot"):
         '''
@@ -81,7 +82,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
-        
+        self.loss_mask = self.generate_loss_mask()
         kwargs.pop("device")
         kwargs.pop("hidden_size")
         kwargs.pop("roi_batch")
@@ -175,45 +176,15 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         return torch.stack(A, dim=0)
 
-    def warmstart_pseudo_output_heads(self):
-        baseline_model = torch.load(CFG.warmstart_path + 'model_final.pth')
-        # print(baseline_model['model'].keys())
+    def generate_loss_mask(self):
+        if os.path.isfile(CFG.base_log + f'mask_{self.roi_batch}.pth'):
+            return torch.load(CFG.base_log + f'mask_{self.roi_batch}.pth').to(self.device)
+        else:
+            mask = create_loss_mask(self.roi_batch, self.num_classes, self.device)
+            torch.save(mask, CFG.base_log + f'mask_{self.roi_batch}.pth')
 
-        self.pseudo_detector.bbox_pred.weight.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.weight']
-        self.pseudo_detector.bbox_pred.bias.data = baseline_model['model']['roi_heads.box_predictor.bbox_pred.bias']
-        self.pseudo_detector.cls_score.weight.data = baseline_model['model']['roi_heads.box_predictor.cls_score.weight']
-        self.pseudo_detector.cls_score.bias.data = baseline_model['model']['roi_heads.box_predictor.cls_score.bias']
-
-        for param in self.pseudo_detector.parameters():
-            param.requires_grad = False
-    
-    def extract_p_A(self, A, p_score):
-        # print(p_score.shape)
-        # p_score_sp = p_score.to_sparse()
-        # N, C = p_score_sp.shape
-        # p_score_sp_t = p_score_sp.transpose(0,1).coalesce()
-        # # print(p_score_sp_t.shape)
-        # p_score_idx, p_score_v = p_score_sp.indices(), p_score_sp.values()
-        # p_score_idx_t, p_score_v_t = p_score_sp_t.indices(), p_score_sp_t.values()
-        # p_A = []
-        # for i in range(len(A)):
-        #     edges, values = torch_sparse.spspmm(p_score_idx, p_score_v, A[i][0], A[i][1], N, C, self.hidden_size)
-            
-        #     edges, values = torch_sparse.spspmm(edges, values, p_score_idx_t, p_score_v_t, N, self.hidden_size, N)
-
-        #     print(edges.shape)
-        #     p_A.append((edges, values))
-
-        p_A = []
-        for i in range(len(A)):
-            Ai = A[i]
-            softmap_Ai = torch.matmul(p_score, Ai).matmul(p_score.t()).to_sparse()
-            # print(softmap_Ai.shape)
-            edges, values = softmap_Ai.indices(), softmap_Ai.values()
-            p_A.append((edges, values))
-
-        return p_A
-
+            return mask
+        
     def forward(self, x):
         """
         Args:
@@ -298,7 +269,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
-            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
+            # "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
+            "loss_p_cls": adj_based_loss(pseudo_scores, self.loss_mask, self.dense_adj_matrix[0])
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 

@@ -74,3 +74,34 @@ def graph_embedding_loss(out_features, adj_matrix, threshold=0, eps=1e-6):
 
     loss = torch.sum(torch.abs(adj_matrix - cosine_inp) * mask_matrix)    
     return loss
+
+def adj_based_loss(pseudo_scores, masks, adj_matrix):
+    '''
+    Calculate the auxilary loss given the pseudo scores and masks
+    pseudo_scores - n_rois, n_class
+    masks - n_class * n_rois, n_class * n_rois
+    '''
+    N, C = pseudo_scores.shape
+    flt_scores = pseudo_scores.flatten().unsqueeze(1)
+    flt_mat = flt_scores * flt_scores.t()
+    flt_mat = flt_mat * masks
+    flt_mat = flt_mat.reshape(C, N, C, N).transpose(1, 2)
+    adj_matrix = adj_matrix.unsqueeze(-1).unsqueeze(-1)
+    flt_mat_weighted = flt_mat * adj_matrix
+    loss = torch.mean(flt_mat_weighted)
+    loss = -torch.log(loss)
+
+    return loss
+
+if __name__ == '__main__':
+
+    # for i in range(200):
+    a = torch.rand(128, 96)
+    mask = torch.rand(96 * 128, 96 * 128)
+    adj = torch.rand(96, 96)
+
+    import time
+    start_t = time.time()
+    loss = adj_based_loss(a, mask, adj)
+    print(loss)
+    print(time.time() - start_t)
