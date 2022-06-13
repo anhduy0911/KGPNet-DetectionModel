@@ -3,9 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as pyg_nn
 import math
-from torch_geometric.utils import remove_self_loops
-import torch_sparse
-from torch_scatter import scatter_add
 
 class GCN(nn.Module):
     def __init__(self, input_dim, hidden_size) -> None:
@@ -73,30 +70,28 @@ class GTN(nn.Module):
         H - dense matrix of shape K_, N, N
         '''
         norm_H = []
-        _, n_node,_ = H.shape
         for i in range(self.num_channels):
-            H_i_sparse = H[i].to_sparse()
-            edge, value= H_i_sparse.indices(), H_i_sparse.values()
-            edge, value = remove_self_loops(edge, value)
-            deg_row, deg_col = self.norm(edge, n_node, value)
-            value = deg_col * value
-            norm_H.append((edge, value))
-        return norm_H
+            # H_i_sparse = H[i].to_sparse()
+            # edge, value= H_i_sparse.indices(), H_i_sparse.values()
+            # edge, value = remove_self_loops(edge, value)
+            # deg_row, deg_col = self.norm(edge, n_node, value)
+            # self.norm_dense(H[i])
+            # import pdb; pdb.set_trace()
+            # value = deg_col * value
 
-    def norm(self, edge_index, num_nodes, edge_weight, improved=False, dtype=None):
-        if edge_weight is None:
-            edge_weight = torch.ones((edge_index.size(1), ),
-                                    dtype=dtype,
-                                    device=edge_index.device)
-        # _, n_nodes = edge_index.shape
-        edge_weight = edge_weight.view(-1)
-        assert edge_weight.size(0) == edge_index.size(1)
-        row, col = edge_index
-        deg = scatter_add(edge_weight.clone(), col, dim=0, dim_size=num_nodes)
-        deg_inv_sqrt = deg.pow(-1)
-        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-
-        return deg_inv_sqrt[row], deg_inv_sqrt[col]
+            # H_i_sparse.values = value
+            # norm_H_dense.append(H_i_sparse.to_dense())
+            # norm_H.append((edge, value))
+            H_i = H[i]
+            H_i.fill_diagonal_(0) # remove self-loops
+            deg_nodes = torch.sum(H_i, dim=0)
+            deg_inv_sqrt = deg_nodes.pow(-1)
+            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+            H_i_norm = H_i.clone() * deg_inv_sqrt.unsqueeze(1)
+            norm_H.append(H_i_norm)
+            # import pdb; pdb.set_trace()
+        norm_H_dense = torch.stack(norm_H, dim=0)
+        return norm_H_dense
 
     def forward(self, A, X):
         # Ws = []
@@ -107,15 +102,17 @@ class GTN(nn.Module):
             else:                
                 # H, W = self.layers[i](A, H)
                 H = self.layers[i](A, H)
+            # H = self.normalization(H)
             H = self.normalization(H)
             # Ws.append(W)
         for i in range(self.num_channels):
+            H_i_sp = H[i].to_sparse()
             if i==0:
-                edge_index, edge_weight = H[i][0], H[i][1]
+                edge_index, edge_weight = H_i_sp.indices(),  H_i_sp.values()
                 X_ = self.gcn(X,edge_index=edge_index, edge_weight=edge_weight)
                 X_ = F.relu(X_)
             else:
-                edge_index, edge_weight = H[i][0], H[i][1]
+                edge_index, edge_weight = H_i_sp.indices(),  H_i_sp.values()
                 X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index, edge_weight=edge_weight))), dim=1)
         X_ = self.linear1(X_)
         X_ = F.relu(X_)
