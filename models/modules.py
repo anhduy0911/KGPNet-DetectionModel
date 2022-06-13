@@ -82,13 +82,17 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
-        self.loss_mask = self.generate_loss_mask()
+        if kwargs['train']:
+            self.loss_mask = self.generate_loss_mask(kwargs['n_gpus'])
+        
+        kwargs.pop("train")
+        kwargs.pop("n_gpus")
         kwargs.pop("device")
         kwargs.pop("hidden_size")
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.0}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -112,10 +116,13 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         box_dim = len( kwargs['box2box_transform'].weights)
         self.bbox_pred = nn.Linear(roi_features, num_bbox_reg_classes * box_dim)
         self.softmax = nn.Softmax(dim=-1)
+        self.sigmoid = nn.Sigmoid()
 
     @classmethod
     def from_config(cls, cfg):
         return {
+            "train": cfg.TRAIN,
+            "n_gpus": cfg.N_GPUS,
             "device": cfg.MODEL.DEVICE,
             "input_shape": cfg.MODEL.ROI_HEADS.PREDICTOR_INPUT_SHAPE,
             "box2box_transform": Box2BoxTransform(weights=cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_WEIGHTS),
@@ -176,14 +183,22 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         return torch.stack(A, dim=0)
 
-    def generate_loss_mask(self):
-        if os.path.isfile(CFG.base_log + f'mask_{self.roi_batch}.pth'):
-            return torch.load(CFG.base_log + f'mask_{self.roi_batch}.pth').to(self.device)
+    def generate_loss_mask(self, n_gpus):
+        if n_gpus == 1:
+            if os.path.isfile(CFG.base_log + f'mask_{self.roi_batch}.pth'):
+                mask = torch.load(CFG.base_log + f'mask_{self.roi_batch}.pth').to(self.device)
+            else:
+                mask = create_loss_mask(self.roi_batch, self.num_classes + 1, self.device)
+                torch.save(mask, CFG.base_log + f'mask_{self.roi_batch}.pth')
         else:
-            mask = create_loss_mask(self.roi_batch, self.num_classes, self.device)
-            torch.save(mask, CFG.base_log + f'mask_{self.roi_batch}.pth')
+            if os.path.isfile(CFG.base_log + f'mask_{self.roi_batch // 2}.pth'):
+                mask = torch.load(CFG.base_log + f'mask_{self.roi_batch // 2}.pth').to(self.device)
+            else:
+                mask = create_loss_mask(self.roi_batch, self.num_classes + 1, self.device)
+                torch.save(mask, CFG.base_log + f'mask_{self.roi_batch // 2}.pth')
 
-            return mask
+        mask.requires_grad = False
+        return mask
         
     def forward(self, x):
         """
@@ -204,6 +219,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         
         pseudo_scores = self.p_cls_score(x) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
+        # pseudo_scores_sm = self.sigmoid(pseudo_scores_sm)
         dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
 
         z = self.fc1(x)

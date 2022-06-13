@@ -12,6 +12,7 @@ def train(args):
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
     cfg.TRAIN = True
+    cfg.N_GPUS = args.n_gpus
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATASETS.TRAIN = ("pills_train",)
@@ -55,6 +56,7 @@ def test(args):
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
     cfg.TRAIN = False
+    cfg.N_GPUS = args.n_gpus
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.MODEL.TRAIN_GCN = args.train_gcn
