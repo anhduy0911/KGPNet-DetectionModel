@@ -81,3 +81,58 @@ def test(args):
     with open(cfg.OUTPUT_DIR + "/results.json", "w") as f:
         json.dump(result, f)
     
+def test_prescription(args):
+    if args.pres_id != '':
+        from utils.util import generate_prescription_test_dataset
+        generate_prescription_test_dataset(args.pres_id)
+
+    from detectron2.data.datasets import register_coco_instances
+    register_coco_instances("pills_test_pres", {}, "data/pills/data_test/instances_test_pres.json", "")
+    
+    cfg = get_cfg()
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.OUTPUT_DIR = CFG.base_log + args.name
+    cfg.DATASETS.TEST = ("pills_test_pres",)
+    cfg.DATALOADER.NUM_WORKERS = args.n_workers
+    cfg.MODEL.WEIGHTS = os.path.join(cfg.OUTPUT_DIR, "model_final.pth")
+    cfg.SOLVER.IMS_PER_BATCH = args.batch_size
+    cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
+    cfg.SOLVER.MAX_ITER = 300    # 300 iterations seems good enough for this toy dataset; you will need to train longer for a practical dataset
+    cfg.SOLVER.STEPS = []        # do not decay learning rate
+    cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = args.batch_size
+    cfg.MODEL.ROI_HEADS.NUM_CLASSES = args.n_classes  # only has one class (ballon). (see https://detectron2.readthedocs.io/tutorials/datasets.html#update-the-config-for-new-datasets)
+    cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.4
+    cfg.MODEL.KEYPOINT_ON = False
+
+    predictor = DefaultPredictor(cfg)
+
+    from detectron2.evaluation import COCOEvaluator, inference_on_dataset
+    from detectron2.data import build_detection_test_loader
+    from detectron2.data import DatasetCatalog
+    from detectron2.utils.visualizer import Visualizer
+    import cv2
+    import matplotlib.pyplot as plt
+
+    # visualization
+    test_dict = DatasetCatalog.get("pills_test_pres")
+    fig, axs = plt.subplots(1, len(test_dict), figsize=(20, 5))
+    for i in range(len(test_dict)):
+        d = test_dict[i]
+        im = cv2.imread(d["file_name"])
+        outputs = predictor(im)
+        print(d['annotations'])
+        v = Visualizer(im[:, :, ::-1],
+                        metadata=d,
+                    #instance_mode=ColorMode.IMAGE_BW   # remove the colors of unsegmented pixels
+        )
+        out = v.draw_instance_predictions(outputs["instances"].to("cpu"))
+        axs[i].imshow(out.get_image())
+    plt.savefig(f'eval_{args.name}.png', dpi=300)
+    
+    # # evaluation
+    evaluator = COCOEvaluator("pills_test_pres", output_dir=cfg.OUTPUT_DIR)
+    val_loader = build_detection_test_loader(cfg, "pills_test_pres")
+    result = inference_on_dataset(predictor.model, val_loader, evaluator)
+    print(result)
+    with open(cfg.OUTPUT_DIR + "/results_pres.json", "w") as f:
+        json.dump(result, f)

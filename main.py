@@ -30,16 +30,17 @@ def main(args):
     elif args.name.startswith('KGP_2step'):
         from models.KGPNet_2step import train, test
     elif args.name.startswith('baseline'):
-        from models.faster_rcnn import train, test
+        from models.faster_rcnn import train, test, test_prescription
     else:
         raise NotImplementedError
 
+    seed_everything(CFG.seed)
     if args.mode == 'train':
-        seed_everything(CFG.seed)
         train(args)
-    else:
-        seed_everything(CFG.seed)
+    elif args.mode == 'test':
         test(args)
+    else:
+        test_prescription(args)
 if __name__ == '__main__':
     import argparse
     
@@ -63,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_workers', type=int, default=CFG.n_workers, metavar='N', help='number of workers')
     parser.add_argument('--resume', type=bool, default=False, metavar='N', help='resume training')
     parser.add_argument('--resume_path', type=str, default='', metavar='N', help='resume training/testing path')
+    parser.add_argument('--pres_id', type=str, default='', metavar='N', help='test prescription id')
     parser.add_argument('--n_classes', type=int, default=CFG.n_classes, metavar='N', help='number of classes')
     parser.add_argument('--max_iters', type=int, default=CFG.max_iters, metavar='N', help='number of max iteration')
     parser.add_argument('--linking_loss_weight', type=float, default=CFG.linking_loss_weight, metavar='N', help='weight of linking loss')
