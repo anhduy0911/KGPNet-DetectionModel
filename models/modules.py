@@ -92,7 +92,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.0}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1, "loss_aux": 0.1}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -218,7 +218,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             x = torch.flatten(x, start_dim=1)
         
         pseudo_scores = self.p_cls_score(x) # N, C
+        vals, indices = torch.topk(pseudo_scores, k=CFG.topk_neighbor, dim=-1)
+        # print(topk)
+        pseudo_scores.zero_()
+        pseudo_scores[torch.arange(pseudo_scores.size(0))[:, None], indices] = vals
+        # print(self.p_cls_score.weight.grad)
         pseudo_scores_sm = self.softmax(pseudo_scores)
+        # import pdb; pdb.set_trace()
+        # print(pseudo_scores_sm)
         # pseudo_scores_sm = self.sigmoid(pseudo_scores_sm)
         dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
 
@@ -280,13 +287,15 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
+        # aux_loss = adj_based_loss(F.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0])
+        aux_loss = adj_based_loss(torch.sigmoid(scores), self.loss_mask, self.dense_adj_matrix[0])
         losses = {
             "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
-            # "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
-            "loss_p_cls": adj_based_loss(pseudo_scores, self.loss_mask, self.dense_adj_matrix[0])
+            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
+            "loss_aux": aux_loss,
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 

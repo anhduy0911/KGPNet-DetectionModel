@@ -1,5 +1,5 @@
 import torch
-
+import config as CFG
 
 def KL_loss_fast_compute(target, input, eps=1e-6):
     '''
@@ -81,17 +81,24 @@ def adj_based_loss(pseudo_scores, masks, adj_matrix):
     pseudo_scores - n_rois, n_class
     masks - n_class * n_rois, n_class * n_rois
     '''
+    vals, indices = torch.topk(adj_matrix, k=CFG.topk_neighbor, dim=-1)
+        # print(topk)
+    adj_matrix.zero_()
+    adj_matrix[torch.arange(adj_matrix.size(0))[:, None], indices] = vals
+
     N, C = pseudo_scores.shape
-    flt_scores = pseudo_scores.flatten().unsqueeze(1)
+    flt_scores = pseudo_scores.flatten().unsqueeze(1).contiguous()
     flt_mat = flt_scores * flt_scores.t()
+    # flt_mat = torch.log(flt_mat)
     flt_mat = flt_mat * masks
-    flt_mat = flt_mat.reshape(C, N, C, N).transpose(1, 2)
-    adj_matrix = adj_matrix.unsqueeze(-1).unsqueeze(-1)
+    flt_mat = flt_mat.reshape(C, N, C, N).transpose(1, 2).contiguous()
+    adj_matrix = adj_matrix.unsqueeze(-1).unsqueeze(-1).contiguous()
     flt_mat_weighted = flt_mat * adj_matrix
     loss = torch.mean(flt_mat_weighted)
     loss = -torch.log(loss)
-
+    # import pdb; pdb.set_trace()
     return loss
+    # return torch.clamp(loss, 0)
 
 if __name__ == '__main__':
 

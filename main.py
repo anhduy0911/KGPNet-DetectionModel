@@ -74,4 +74,6 @@ if __name__ == '__main__':
     
     # init_distributed_mode(args)
     # seed_everything(args.seed)
+    import torch
+    torch.autograd.set_detect_anomaly(True)
     launch(main, args.n_gpus, args=(args,))
