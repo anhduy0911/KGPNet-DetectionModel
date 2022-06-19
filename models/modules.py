@@ -20,7 +20,7 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, adj_based_loss
+from utils.losses import adj_loss_recur
 from utils.util import create_loss_mask
 import config as CFG
 import pickle
@@ -82,8 +82,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
-        if kwargs['train']:
-            self.loss_mask = self.generate_loss_mask(kwargs['n_gpus'])
+        # if kwargs['train']:
+        #     self.loss_mask = self.generate_loss_mask(kwargs['n_gpus'])
         
         kwargs.pop("train")
         kwargs.pop("n_gpus")
@@ -158,7 +158,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.sigmoid(adj_mat)
+        adj_mat = torch.softmax(adj_mat, dim=-1)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
@@ -194,7 +194,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             if os.path.isfile(CFG.base_log + f'mask_{self.roi_batch // 2}.pth'):
                 mask = torch.load(CFG.base_log + f'mask_{self.roi_batch // 2}.pth').to(self.device)
             else:
-                mask = create_loss_mask(self.roi_batch, self.num_classes + 1, self.device)
+                mask = create_loss_mask(self.roi_batch // 2, self.num_classes + 1, self.device)
                 torch.save(mask, CFG.base_log + f'mask_{self.roi_batch // 2}.pth')
 
         mask.requires_grad = False
@@ -270,6 +270,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         gt_classes = (
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
+        gt_classes_per_img = [torch.unique(p.gt_classes) for p in proposals]
+        # gt_classes_wo_duplicate = torch.unique(gt_classes)#.cpu().detach().tolist()
         _log_classification_stats(scores, gt_classes)
 
         # parse box regression outputs
@@ -277,7 +279,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)  # Nx4
             assert not proposal_boxes.requires_grad, "Proposals should not require gradients!"
             # If "gt_boxes" does not exist, the proposals must be all negative and
-            # should not be included in regression loss computation.
+            # should not be included in regression loss computation.  
             # Here we just use proposal_boxes as an arbitrary placeholder because its
             # value won't be used in self.box_reg_loss().
             gt_boxes = cat(
@@ -287,14 +289,17 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
-        # aux_loss = adj_based_loss(F.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0])
-        aux_loss = adj_based_loss(torch.sigmoid(scores), self.loss_mask, self.dense_adj_matrix[0])
+        # aux_loss = adj_based_loss(F.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0], [1,2,3])
+        # aux_loss = adj_based_loss(torch.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0], gt_classes_wo_duplicate)
+        aux_loss = adj_loss_recur(torch.softmax(pseudo_scores, dim=-1), self.dense_adj_matrix[0], gt_classes_per_img)
+        # import pdb; pdb.set_trace()
+        
         losses = {
-            "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
-            "loss_box_reg": self.box_reg_loss(
-                proposal_boxes, gt_boxes, proposal_deltas, gt_classes
-            ),
-            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
+            # "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
+            # "loss_box_reg": self.box_reg_loss(
+            #     proposal_boxes, gt_boxes, proposal_deltas, gt_classes
+            # ),
+            # "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
             "loss_aux": aux_loss,
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}

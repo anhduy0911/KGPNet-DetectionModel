@@ -16,6 +16,7 @@ seed = 9110
 max_iters = 5000
 test_period = 5000
 cpt_frequency = 5000
+roi_per_img = 128
 linking_loss_weight = 0.1
 num_head_gtn = 5
 topk_neighbor = 10
