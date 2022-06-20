@@ -102,7 +102,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         nn.LeakyReLU(),
         nn.Linear(hidden_size, hidden_size)
         )
-        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 2)
+        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
         # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
@@ -150,17 +150,23 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.sigmoid(adj_mat)
+        adj_mat_sigmoid = torch.sigmoid(adj_mat)
+        adj_mat_softmax = torch.softmax(adj_mat, dim=-1)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
-        adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
-        adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
+        adj_mat_sigmoid = torch.cat([adj_mat_sigmoid, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
+        adj_mat_sigmoid = torch.cat([adj_mat_sigmoid, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
         
+        adj_mat_softmax = torch.cat([adj_mat_softmax, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
+        adj_mat_softmax = torch.cat([adj_mat_softmax, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
+
         A = []
         # adj_mat = adj_mat.to_sparse().to(self.device)
-        adj_mat = adj_mat.to(self.device)
+        adj_mat_softmax = adj_mat_softmax.to(self.device)
+        adj_mat_sigmoid = adj_mat_sigmoid.to(self.device)
         # print(adj_mat.shape)
         # A.append((adj_mat.indices(), adj_mat.values()))
-        A.append(adj_mat)
+        A.append(adj_mat_softmax)
+        A.append(adj_mat_sigmoid)
         # size_mat = build_size_graph_data().to_sparse().to(self.device)
         size_mat = build_size_graph_data().to(self.device)
         # print(size_mat.shape)
