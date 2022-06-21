@@ -109,11 +109,14 @@ class GTN(nn.Module):
             H_i_sp = H[i].to_sparse()
             if i==0:
                 edge_index, edge_weight = H_i_sp.indices(),  H_i_sp.values()
+                # print(X.shape)
+                # X_flt = X.view(-1, X.shape[-1])
                 X_ = self.gcn(X,edge_index=edge_index, edge_weight=edge_weight)
                 X_ = F.relu(X_)
+                # print(X_.shape)
             else:
                 edge_index, edge_weight = H_i_sp.indices(),  H_i_sp.values()
-                X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index, edge_weight=edge_weight))), dim=1)
+                X_ = torch.cat((X_,F.relu(self.gcn(X,edge_index=edge_index, edge_weight=edge_weight))), dim=-1)
         X_ = self.linear1(X_)
         X_ = F.relu(X_)
         y = self.linear2(X_)

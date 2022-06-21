@@ -77,11 +77,13 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.num_classes = num_classes = kwargs["num_classes"]
         roi_features = kwargs['input_shape']
         self.roi_batch = kwargs['roi_batch']
+        self.bs = kwargs['bs']
         # print(f'ROI BATCH: {self.roi_batch}')
         self.arg = kwargs
         # self.graph_embedding = torch.load(kwargs['graph_ebd_path'])
         self.device = kwargs["device"]
         
+        kwargs.pop("bs")
         kwargs.pop("device")
         kwargs.pop("hidden_size")
         kwargs.pop("roi_batch")
@@ -102,7 +104,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         nn.LeakyReLU(),
         nn.Linear(hidden_size, hidden_size)
         )
-        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
+        self.graph_block = GTN(len(self.dense_adj_matrix) + self.bs, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
         # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
@@ -127,7 +129,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             "test_nms_thresh"       : cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST,
             "test_topk_per_image"   : cfg.TEST.DETECTIONS_PER_IMAGE,
             "box_reg_loss_type"     : cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_TYPE,
-            "roi_batch"             : cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE * cfg.SOLVER.IMS_PER_BATCH if cfg.TRAIN else cfg.MODEL.RPN.POST_NMS_TOPK_TEST
+            "roi_batch"             : cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE * cfg.SOLVER.IMS_PER_BATCH if cfg.TRAIN else cfg.MODEL.RPN.POST_NMS_TOPK_TEST,
+            "bs"                    : cfg.SOLVER.IMS_PER_BATCH
             # "loss_weight"           : {"loss_box_reg": cfg.MODEL.ROI_BOX_HEAD.BBOX_REG_LOSS_WEIGHT, "loss_linking": cfg.MODEL.ROI_HEADS.LINKING_LOSS_WEIGHT},
             # fmt: on
         }
@@ -178,8 +181,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # A.append((edge_tmp,value_tmp)) # Add self loop adj matrix
         self_loop_mat = torch.eye(self.arg['num_classes'] + 1, dtype=torch.float32).to(self.device)
         A.append(self_loop_mat)
-
-        return torch.stack(A, dim=0)
+        self.adj_dim = len(A)
+        return torch.stack(A, dim=0).repeat(self.bs, 1, 1)
 
     def forward(self, x):
         """
@@ -194,36 +197,39 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             Second tensor: bounding box regression deltas for each box. Shape is shape (N,Kx4),
             or (N,4) for class-agnostic regression.
         """
+        if x.dim() == 2:
+            x_pi = torch.reshape(x, (self.bs, -1, x.shape[1])) # B, N, H
 
-        if x.dim() > 2:
-            x = torch.flatten(x, start_dim=1)
-        
-        pseudo_scores = self.p_cls_score(x) # N, C
+        pseudo_scores = self.p_cls_score(x_pi) # N, C
         pseudo_scores_sm = self.softmax(pseudo_scores)
-        dynamic_adj_mat = torch.matmul(pseudo_scores_sm, self.dense_adj_matrix).matmul(pseudo_scores_sm.t()) # N, N
+        pseudo_scores_sm_rp = pseudo_scores_sm.repeat(self.adj_dim, 1, 1) # B, N, C
+    
+        dynamic_adj_mat = torch.bmm(pseudo_scores_sm_rp, self.dense_adj_matrix).bmm(pseudo_scores_sm_rp.transpose(1,2)) # B * k, N, N
 
-        z = self.fc1(x)
-        eps = torch.mm(z, z.t())
-        vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
-        # print(topk)
-        eps.zero_()
-        eps[torch.arange(eps.size(0))[:, None], indices] = vals
-        dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
+        z = self.fc1(x_pi) # B, N, H
+        eps = torch.bmm(z, z.transpose(1,2)) # B, N, N
+        # vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
+        # # print(topk)
+        # eps.zero_()
+        # eps[torch.arange(eps.size(0))[:, None], indices] = vals
+        dynamic_adj_mat = torch.cat([eps, dynamic_adj_mat], dim=0) # B * k + B, N, N
         # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
         cls_w = self.p_cls_score.weight
-        cls_w_sm = torch.mm(pseudo_scores_sm, cls_w) # N, D
+        cls_w_sm = torch.bmm(pseudo_scores_sm, cls_w.unsqueeze(0).repeat(self.bs, 1,1)) # N, D
         x_context = self.graph_block(dynamic_adj_mat, cls_w_sm) # N, H
-        
-        x_enhanced = torch.cat([x, x_context], dim=1)
+        x_enhanced = torch.cat([x_pi, x_context], dim=-1) 
 
         proposal_deltas = self.bbox_pred(x)
         scores = self.cls_score(x_enhanced)
+        scores = scores.view(-1, scores.shape[-1]).contiguous()
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
         # print(scores)
-        return scores, proposal_deltas, pseudo_scores_sm
+        # import pdb; pdb.set_trace()
+
+        return scores, proposal_deltas, pseudo_scores_sm.view(-1, pseudo_scores_sm.shape[-1]).contiguous()
         # return scores, proposal_deltas, 0
 
     def losses(self, predictions, proposals):
