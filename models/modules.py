@@ -25,7 +25,7 @@ import config as CFG
 import pickle
 import tqdm
 import matplotlib.pyplot as plt
-from torch.nn.functional import nll_loss
+from torch.nn.functional import nll_loss, multilabel_soft_margin_loss
 # from models.graph_modules import GCN, GTN
 from models.graph_modules_dense import GCN, GTN
 from data.graph.graph_building import build_size_graph_data
@@ -87,7 +87,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -102,15 +102,16 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         nn.LeakyReLU(),
         nn.Linear(hidden_size, hidden_size)
         )
-        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 2)
+        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
-        # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
-        self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
+        self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
+        self.cls_score = nn.Linear(roi_features, num_classes + 1)
         num_bbox_reg_classes = 1 if kwargs['cls_agnostic_bbox_reg'] else num_classes
         box_dim = len( kwargs['box2box_transform'].weights)
         self.bbox_pred = nn.Linear(roi_features, num_bbox_reg_classes * box_dim)
         self.softmax = nn.Softmax(dim=-1)
+        self.sigmoid = nn.Sigmoid()
 
     @classmethod
     def from_config(cls, cfg):
@@ -150,7 +151,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.sigmoid(adj_mat)
+        adj_mat = torch.softmax(adj_mat, dim=-1)
+        # adj_mat = adj_mat / (torch.max(adj_mat, dim=-1, keepdim=    True)[0] + 1e-8)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
@@ -198,21 +200,22 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
 
         z = self.fc1(x)
         eps = torch.mm(z, z.t())
-        vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
-        # print(topk)
-        eps.zero_()
-        eps[torch.arange(eps.size(0))[:, None], indices] = vals
+        # vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
+        # # print(topk)
+        # eps.zero_()
+        # eps[torch.arange(eps.size(0))[:, None], indices] = vals
         dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
         # dynamic_adj_mat = self.extract_p_A(self.dense_adj_matrix, pseudo_scores_sm)
         # edge_idx, edge_w = dense_to_sparse(dynamic_adj_mat)
         # print(edge_idx.shape, edge_w.shape)
-        cls_w = self.p_cls_score.weight
+        cls_w = self.cls_score.weight
         cls_w_sm = torch.mm(pseudo_scores_sm, cls_w) # N, D
         x_context = self.graph_block(dynamic_adj_mat, cls_w_sm) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
-
-        proposal_deltas = self.bbox_pred(x)
+        x_enhanced = self.fc2(x_enhanced)
+        
+        proposal_deltas = self.bbox_pred(x_enhanced)
         scores = self.cls_score(x_enhanced)
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
@@ -237,6 +240,10 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         gt_classes = (
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
+
+        adj_gt_classes = (
+            cat([self.dense_adj_matrix[0, p.gt_classes] for p in proposals], dim=0) if len(proposals) else torch.empty(0)
+        )
         _log_classification_stats(scores, gt_classes)
 
         # parse box regression outputs
@@ -260,6 +267,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
             "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
+            # "loss_p_cls": multilabel_soft_margin_loss(pseudo_scores, adj_gt_classes, reduction="mean")
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
 
