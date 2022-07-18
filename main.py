@@ -1,5 +1,7 @@
 import config as CFG
 from detectron2.engine import launch
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def seed_everything(seed: int):
     import random, os
@@ -20,8 +22,10 @@ def register_dataset():
     '''
     from detectron2.data.datasets import register_coco_instances
 
-    register_coco_instances("pills_train", {}, "data/pills/data_train/instances_train.json", "")
-    register_coco_instances("pills_test", {}, "data/pills/data_test/instances_test.json", "")
+    # register_coco_instances("pills_train", {}, "data/pills/data_train/instances_train.json", "")
+    # register_coco_instances("pills_test", {}, "data/pills/data_test/instances_test.json", "")
+    register_coco_instances("pills_train", {}, "data/pills/data_train_ai4vn/instances_train_ai4vn.json", "")
+    register_coco_instances("pills_test", {}, "data/pills/data_test_ai4vn/instances_test_ai4vn.json", "")
 
 def main(args):
     register_dataset()

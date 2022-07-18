@@ -10,14 +10,14 @@ from utils.custom_trainer import CustomTrainer
 
 def train(args):
     cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_101_FPN_3x.yaml"))
     cfg.TRAIN = True
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.MODEL.TRAIN_GCN = args.train_gcn
     cfg.DATASETS.TRAIN = ("pills_train",)
     cfg.DATASETS.TEST = ("pills_test",)
     cfg.DATALOADER.NUM_WORKERS = args.n_workers
-    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")  # Let training initialize from model zoo
+    cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_101_FPN_3x.yaml")  # Let training initialize from model zoo
     # cfg.MODEL.WEIGHTS = os.path.join(CFG.warmstart_path, "model_final.pth")
     cfg.SOLVER.IMS_PER_BATCH = args.batch_size
     cfg.SOLVER.BASE_LR = args.lr  # pick a good LR
@@ -53,7 +53,7 @@ def save_model(trainer, name):
 def test(args):
     print(args)
     cfg = get_cfg()
-    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
+    cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_101_FPN_3x.yaml"))
     cfg.TRAIN = False
     cfg.OUTPUT_DIR = CFG.base_log + args.name
     cfg.DATASETS.TEST = ("pills_test",)

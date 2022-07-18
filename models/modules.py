@@ -93,12 +93,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(f'ROI BATCH: {self.roi_batch}')
         self.dense_adj_matrix = self.build_graph_data()
         # self.dense_adj_matrix = self.dense_adj_matrix.to(self.device)
-        
         # the graph block for aggregating the context embedding
         # self.graph_block = GCN(roi_features, hidden_size)
-        self.fc1 = nn.Sequential(    
+        self.fc1 = nn.Sequential(
         nn.Linear(roi_features, hidden_size),
-        # nn.BatchNorm1d(hidden_size), 
+        # nn.BatchNorm1d(hidden_size),
         nn.LeakyReLU(),
         nn.Linear(hidden_size, hidden_size)
         )
@@ -134,24 +133,28 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         }
 
     def build_graph_data(self):
-        mapped_pill_idx = pickle.load(open(CFG.pill_root + 'name2id.pkl', "rb"))
+        # mapped_pill_idx = pickle.load(open(CFG.pill_root + 'name2id.pkl', "rb"))
         edge_index = []
         edge_weight = []
         
         pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_graph.csv', header=0)
         for x, y, w in pill_edge.values:
-            if x in mapped_pill_idx and y in mapped_pill_idx:
-                assert(w > 0)
-                edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
-                edge_weight.append(w)
-                edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
-                edge_weight.append(w)
+            # if x in mapped_pill_idx and y in mapped_pill_idx:
+            assert(w > 0)
+            edge_index.append([x, y])
+            edge_weight.append(w)
+            edge_index.append([y, x])
+            edge_weight.append(w)
         
-        data = Data(x=torch.eye(self.arg['num_classes'], dtype=torch.float32), edge_index=torch.tensor(edge_index).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
+        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        edge_weight = torch.tensor(edge_weight).unsqueeze(1)
+        # print(f'{edge_index.shape} {edge_weight.shape}')
+        data = Data(x=torch.eye(self.arg['num_classes'], dtype=torch.float32), edge_index=edge_index, edge_attr=edge_weight)
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
+        # print(adj_mat.shape)
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.softmax(adj_mat, dim=-1)
+        adj_mat = torch.softmax(adj_mat, dim=-1, dtype=torch.float32)
         # adj_mat = adj_mat / (torch.max(adj_mat, dim=-1, keepdim=    True)[0] + 1e-8)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
@@ -165,7 +168,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         A.append(adj_mat)
         # size_mat = build_size_graph_data().to_sparse().to(self.device)
         size_mat = build_size_graph_data().to(self.device)
-        # print(size_mat.shape)
         # A.append((size_mat.indices(), size_mat.values()))
         A.append(size_mat)
 
@@ -174,7 +176,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # A.append((edge_tmp,value_tmp)) # Add self loop adj matrix
         self_loop_mat = torch.eye(self.arg['num_classes'] + 1, dtype=torch.float32).to(self.device)
         A.append(self_loop_mat)
-
         return torch.stack(A, dim=0)
 
     def forward(self, x):

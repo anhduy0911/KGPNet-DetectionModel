@@ -30,7 +30,8 @@ def get_info(filename):
             check_end_pill= False
             pill = {}
             pill['usage'] = ''
-            pill['name'] = re.sub(r"^[0-9]+['\- /]*[\)]\s*", '', item['text'])
+            # pill['name'] = re.sub(r"^[0-9]+['\- /]*[\)]\s*", '', item['text'])
+            pill['name'] = item['mapping']
             visited[idx] = 1
             pill['quantity'] = ''
             for i in range(len(data)):
@@ -50,14 +51,14 @@ def get_info(filename):
     result['diagnose'] = []
     if jellyfish.jaro_distance(diag_str[:10], 'Chẩn đoán') < 0.8:
         diag_words = [st for st in diag_str.split(' ') if st.strip() != '']
-        print(diag_words)
+        # print(diag_words)
         scores = [jellyfish.jaro_distance(str_t, 'Chẩn đoán') for str_t in diag_words]
-        print(scores)
+        # print(scores)
         keyword = diag_words[np.argmax(scores)]
         
         indx = diag_str.find(keyword)
         diag_str = diag_str[indx:]
-        print(diag_str)
+        # print(diag_str)
     
     wrong_str = ['F00%','IIO','331','Ell', 'G46?', '110', '160', '170', '[25', '[10', '[20', '140', '1677','149','167t', '125', '150', '(((I10)', 'bàn I', '142', 'KS2', 'EI1', 'KO4', "167'", 'JII', 'j42', '120', 'El1', '142', '[J20', '[31', 'G46%', 'M1?', '(S33)Sai', 'E1i']
     true_str =  ['F00*','I10','J31','E11', 'G46*', 'I10', 'I60', 'I70', 'I25', 'I10', 'I20', 'J40','I67', 'I49', 'I67', 'I25', 'I50', '(I10)', 'bàn 1', 'J42', 'K52', 'E11', 'K04','I67','J11', 'J42', 'J20', 'E11', 'J42', 'J20', 'J31', 'G46*', 'M10', '(S33)', 'E11']
@@ -65,9 +66,9 @@ def get_info(filename):
         diag_str = diag_str.replace(old, new)
     
     result['diagnose'] = [i.strip() for i in re.split(';|:' , diag_str) if jellyfish.jaro_distance(i.strip(), 'Chẩn đoán') < 0.8]
-    print(result['diagnose'])
+    # print(result['diagnose'])
     result['diagnose'] = [i.split(' ')[0] for i in result['diagnose'] if re.match(r'.\w\d\d*', i)]
-    print(result['diagnose'])
+    print(f'{filename} {result["diagnose"]}')
     
     # with open('data/prescription/'+ filename, 'w', encoding= 'utf-8') as f:
     #     json.dump(result, f, ensure_ascii= False, indent= 4)
@@ -80,6 +81,6 @@ if __name__ == '__main__':
         res = get_info(path)
         json_merge.append(res)
         
-    with open('data/prescription/_merged_prescriptions.json', 'w', encoding= 'utf-8') as f:
+    with open('data/prescription/_merged_prescriptions_vaipe.json', 'w', encoding= 'utf-8') as f:
         json.dump(json_merge, f, ensure_ascii= False, indent= 4)
     # res = get_info('20220104_233915445103.json')

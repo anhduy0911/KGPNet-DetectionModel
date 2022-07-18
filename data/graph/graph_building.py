@@ -50,10 +50,10 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
     weighted_edges = {}
 
     exclude_names = []
-    if exclude_path != '':
-        exclude_ids = pickle.load(open(exclude_path, 'rb'))
-        name2idx = pickle.load(open('./data/pills/name2id.pkl', 'r'))
-        exclude_names = [list(name2idx.keys())[list(name2idx.values()).index(i)] for i in exclude_ids]
+    # if exclude_path != '':
+    #     exclude_ids = pickle.load(open(exclude_path, 'rb'))
+    #     name2idx = pickle.load(open('./data/pills/name2id.pkl', 'r'))
+    #     exclude_names = [list(name2idx.keys())[list(name2idx.values()).index(i)] for i in exclude_ids]
     
     for pill in pill_occurence.keys():
         for diag in coocurence[pill].keys():
@@ -70,23 +70,20 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
                 if pill in exclude_names:
                     print(f'Excluding {pill}')
                     continue
-                f.write(pill + ',' + diag + ',' + str(weight) + '\n')
+                f.write(str(pill) + ',' + diag + ',' + str(weight) + '\n')
 
 def build_graph_data():
-    mapped_pill_idx = pickle.load(open(CFG.pill_root + 'name2id.pkl', "rb"))
     edge_index = []
     edge_weight = []
     
     pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_graph.csv', header=0)
     for x, y, w in pill_edge.values:
-        if x in mapped_pill_idx and y in mapped_pill_idx:
-            assert(w > 0)
-            edge_index.append([mapped_pill_idx[x], mapped_pill_idx[y]])
-            edge_weight.append(w)
-            edge_index.append([mapped_pill_idx[y], mapped_pill_idx[x]])
-            edge_weight.append(w)
+        edge_index.append([x, y])
+        edge_weight.append(w)
+        edge_index.append([y, x])
+        edge_weight.append(w)
     
-    data = Data(x=torch.eye(CFG.n_classes, dtype=torch.float32), edge_index=torch.tensor(edge_index).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
+    data = Data(x=torch.eye(CFG.n_classes, dtype=torch.float32), edge_index=torch.tensor(edge_index, dtype=torch.long).t().contiguous(), edge_attr=torch.tensor(edge_weight).unsqueeze(1))
     # print(data)
     adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
     # pad 0 to the end of the adj matrix
@@ -112,9 +109,9 @@ def build_size_graph_data():
 def merge_multilabel_meta(root, train):
     # merge multilabel meta
     if train:
-        path = root + 'data_train/instances_train.json'
+        path = root + 'data_train_ai4vn/instances_train_ai4vn.json'
     else:
-        path = root + 'data_test/instances_test.json'
+        path = root + 'data_test_ai4vn/instances_test_ai4vn.json'
 
     meta = json.load(open(path, 'r'))
 
@@ -126,16 +123,16 @@ def merge_multilabel_meta(root, train):
         meta_dict[pic].append(att['category_id'])
 
     if train:
-        json.dump(meta_dict, open(root + 'data_train/multilabel_meta.json', 'w'))
+        json.dump(meta_dict, open(root + 'data_train_ai4vn/multilabel_meta.json', 'w'))
     else:
-        json.dump(meta_dict, open(root + 'data_test/multilabel_meta.json', 'w'))
+        json.dump(meta_dict, open(root + 'data_test_ai4vn/multilabel_meta.json', 'w'))
 
 def build_size_graph(train):
     if train:
-        path = 'data/pills/data_train/instances_train.json'
-        path_multilabel = 'data/pills/data_train/multilabel_meta.json'
+        path = 'data/pills/data_train_ai4vn/instances_train_ai4vn.json'
+        path_multilabel = 'data/pills/data_train_ai4vn/multilabel_meta.json'
     else:
-        path = 'data/pills/data_test/instances_test.json'
+        path = 'data/pills/data_test/instances_test_ai4vn.json'
         
     annots = json.load(open(path, 'r'))['annotations']
     multilabel_dict = json.load(open(path_multilabel, 'r'))
@@ -217,25 +214,25 @@ def generate_pill_edges(pill_diagnose_path):
                 continue
             for diag in diags:
                 if ((pill_a, diag) in filtered_pill_edges.index) and ((pill_b, diag) in filtered_pill_edges.index):
-                    w1 = filtered_pill_edges.loc[(pill_a, diag)]['weight']
-                    w2 = filtered_pill_edges.loc[(pill_b, diag)]['weight']
+                    w1 = filtered_pill_edges.loc[(pill_a, diag)]['weight'].values[0]
+                    w2 = filtered_pill_edges.loc[(pill_b, diag)]['weight'].values[0]
+                    print(f'{w1} {w2}')
                     if (pill_a, pill_b) in pill_pill_edges.index:
                         pill_pill_edges.loc[(pill_a, pill_b)]['weight'] += w1 + w2
                     elif (pill_b, pill_a) in pill_pill_edges.index:
                         pill_pill_edges.loc[(pill_b, pill_a)]['weight'] += w1 + w2
                     else:
-                        row = {'pill1': pill_a, 'pill2': pill_b, 'weight': w1 + w2}
-                        pill_pill_edges = pill_pill_edges.concat(row, ignore_index=True, verify_integrity=True)
+                        pill_pill_edges = pd.concat([pill_pill_edges, pd.DataFrame([[pill_a, pill_b, w1 + w2]], columns=pill_pill_edges.columns)], ignore_index=True)
 
     pill_pill_edges = pill_pill_edges.groupby(['pill1', 'pill2']).sum()
     print(pill_pill_edges.head())
     pill_pill_edges.to_csv('data/graph/pill_pill_graph.csv')
 
 if __name__ == '__main__':
-    # build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
-    # merge_multilabel_meta(root='./data/pills/', train=False)
-    # build_size_graph(train=True)
-    print(build_size_graph_data())
+    # build_KG_graph('data/prescription/_merged_prescriptions_vaipe.json', name='pill_diagnose_graph')
+    # merge_multilabel_meta(root='./data/pills/', train=True)
+    build_size_graph(train=True)
+    # print(build_size_graph_data())
     # prepare_prescription_dataset('data/prescriptions/condensed_data.json')
     # generate_pill_edges('data/graph/pill_diagnose_graph.csv')
     # condensed_result_file()
