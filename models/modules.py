@@ -1,3 +1,4 @@
+from re import X
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -20,7 +21,7 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import adj_loss_recur
+from utils.losses import adj_based_loss_2, adj_based_loss_3, adj_loss_recur_fs
 from utils.util import create_loss_mask
 import config as CFG
 import pickle
@@ -92,7 +93,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1, "loss_aux": 0.1}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.1, "loss_aux": 1}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -158,7 +159,9 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.softmax(adj_mat, dim=-1)
+        # adj_mat = torch.softmax(adj_mat, dim=-1)
+        adj_mat = adj_mat / torch.max(adj_mat, dim=-1, keepdim=True)[0]
+        print(adj_mat)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
         adj_mat = torch.cat([adj_mat, torch.zeros((self.arg['num_classes'] + 1, 1), dtype=torch.float32)], dim=1)
@@ -217,11 +220,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         if x.dim() > 2:
             x = torch.flatten(x, start_dim=1)
         
-        pseudo_scores = self.p_cls_score(x) # N, C
-        vals, indices = torch.topk(pseudo_scores, k=CFG.topk_neighbor, dim=-1)
-        # print(topk)
-        pseudo_scores.zero_()
-        pseudo_scores[torch.arange(pseudo_scores.size(0))[:, None], indices] = vals
+        pseudo_scores = self.p_cls_score(x) # N, C        
         # print(self.p_cls_score.weight.grad)
         pseudo_scores_sm = self.softmax(pseudo_scores)
         # import pdb; pdb.set_trace()
@@ -232,7 +231,6 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         z = self.fc1(x)
         eps = torch.mm(z, z.t())
         vals, indices = torch.topk(eps, k=CFG.topk_neighbor, dim=-1)
-        # print(topk)
         eps.zero_()
         eps[torch.arange(eps.size(0))[:, None], indices] = vals
         dynamic_adj_mat = torch.cat([eps.unsqueeze(0), dynamic_adj_mat], dim=0)
@@ -250,7 +248,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
         # print(scores)
-        return scores, proposal_deltas, pseudo_scores_sm
+        return scores, proposal_deltas, pseudo_scores_sm, z
+        # return scores, proposal_deltas, pseudo_scores_sm
         # return scores, proposal_deltas, 0
 
     def losses(self, predictions, proposals):
@@ -264,14 +263,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         Returns:
             Dict[str, Tensor]: dict of losses
         """
-        scores, proposal_deltas, pseudo_scores = predictions
+        scores, proposal_deltas, pseudo_scores, x = predictions
 
         # parse classification outputs
         gt_classes = (
             cat([p.gt_classes for p in proposals], dim=0) if len(proposals) else torch.empty(0)
         )
         gt_classes_per_img = [torch.unique(p.gt_classes) for p in proposals]
-        # gt_classes_wo_duplicate = torch.unique(gt_classes)#.cpu().detach().tolist()
+        gt_classes_wo_duplicate = torch.unique(gt_classes)#.cpu().detach().tolist()
         _log_classification_stats(scores, gt_classes)
 
         # parse box regression outputs
@@ -289,17 +288,16 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
-        # aux_loss = adj_based_loss(F.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0], [1,2,3])
-        # aux_loss = adj_based_loss(torch.softmax(scores, dim=-1), self.loss_mask, self.dense_adj_matrix[0], gt_classes_wo_duplicate)
-        aux_loss = adj_loss_recur(torch.softmax(pseudo_scores, dim=-1), self.dense_adj_matrix[0], gt_classes_per_img)
-        # import pdb; pdb.set_trace()
-        
+        # aux_loss = adj_loss_recur_fs(torch.softmax(scores, dim=-1), self.dense_adj_matrix[0], gt_classes, gt_classes_per_img)
+        aux_loss = adj_based_loss_2(torch.softmax(pseudo_scores, dim=-1), self.dense_adj_matrix[0], x, gt_classes_per_img)
+        # aux_loss = adj_based_loss_3(torch.softmax(pseudo_scores, dim=-1), self.dense_adj_matrix[0], gt_classes_per_img)
+        print(aux_loss)
         losses = {
-            # "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
-            # "loss_box_reg": self.box_reg_loss(
-            #     proposal_boxes, gt_boxes, proposal_deltas, gt_classes
-            # ),
-            # "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
+            "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
+            "loss_box_reg": self.box_reg_loss(
+                proposal_boxes, gt_boxes, proposal_deltas, gt_classes
+            ),
+            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
             "loss_aux": aux_loss,
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}
@@ -379,7 +377,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         """
         if not len(proposals):
             return []
-        _, proposal_deltas, _ = predictions
+        _, proposal_deltas, _, _ = predictions
         num_prop_per_image = [len(p) for p in proposals]
         proposal_boxes = cat([p.proposal_boxes.tensor for p in proposals], dim=0)
         predict_boxes = self.box2box_transform.apply_deltas(
@@ -402,7 +400,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
                 A list of Tensors of predicted class probabilities for each image.
                 Element i has shape (Ri, K + 1), where Ri is the number of proposals for image i.
         """
-        scores, _, _ = predictions
+        scores, _, _, _ = predictions
         num_inst_per_image = [len(p) for p in proposals]
         probs = F.softmax(scores, dim=-1)
         return probs.split(num_inst_per_image, dim=0)
