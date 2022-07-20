@@ -39,16 +39,16 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
                     coocurence[pill][diag_code] = coocurence[pill].get(diag_code, 0) + 1
                     coocurence[diag_code][pill] = coocurence[diag_code].get(pill, 0) + 1
 
-    convert_KG_data(json_file)
+        return len(data)   
+        # import pdb; pdb.set_trace()
+    num_pres = convert_KG_data(json_file)
 
     def tf_idf(pill, diag):
         tf = coocurence[pill][diag] / diag_occurence[diag]
-        idf =  math.log( sum(diag_occurence.values()) / sum(coocurence[pill].values()))
-
+        idf =  math.log(num_pres / pill_occurence[pill])
         return tf * idf
 
     weighted_edges = {}
-
     exclude_names = []
     if exclude_path != '':
         exclude_ids = pickle.load(open(exclude_path, 'rb'))
@@ -62,6 +62,12 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
                 weighted_edges[pill] = {}
             weighted_edges[pill][diag] = tf_idf(pill, diag)
 
+    # row normalization for probability modeling
+    for pill in weighted_edges.keys():
+        sum_i = sum(weighted_edges[pill].values())
+        for diag in weighted_edges[pill].keys():
+            weighted_edges[pill][diag] /= sum_i
+    
     # print(weighted_edges)
     with open('data/graph/' + name + '.csv', 'w') as f:
         for pill in weighted_edges.keys():
@@ -71,6 +77,13 @@ def build_KG_graph(json_file, exclude_path='', name='pill_data'):
                     print(f'Excluding {pill}')
                     continue
                 f.write(pill + ',' + diag + ',' + str(weight) + '\n')
+    
+    # NORMALIZE DIAGNOSE CODE OCCURENCE PROBABILITY
+    sum_diag = sum(diag_occurence.values())
+    for diag in diag_occurence.keys():
+        diag_occurence[diag] /= sum_diag
+    with open('data/graph/diag_occ_prob.json', 'w') as fi:
+        json.dump(diag_occurence, fi)
 
 def build_graph_data():
     mapped_pill_idx = pickle.load(open(CFG.pill_root + 'name2id.pkl', "rb"))
@@ -201,14 +214,18 @@ def generate_pill_edges(pill_diagnose_path):
     pill_edges = pd.read_csv(pill_diagnose_path, names= ["pill","diagnose","weight"])
     pills = pill_edges.pill.unique()
     diags = pill_edges.diagnose.unique()
-    
-    pill_edges.set_index(['pill', 'diagnose'], inplace=True)
-    print(pill_edges.describe())
 
+    # PILL DIAGNOSE BIGRAPH
+    pill_edges.set_index(['pill', 'diagnose'], inplace=True)
+    # print(pill_edges.describe())
     filtered_pill_edges = pill_edges.loc[pill_edges['weight'] > pill_edges['weight'].quantile(0.2)]
     print(filtered_pill_edges.head())
     filtered_pill_edges = filtered_pill_edges.sort_index()
 
+    # DIAGNOSE CODE PROBABILITY
+    diag_prob = json.load(open('data/graph/diag_occ_prob.json', 'r'))
+
+    # PILL PILL GRAPH FORMULATION
     pill_pill_edges = pd.DataFrame(columns=['pill1', 'pill2', 'weight'])
     print(pill_pill_edges.head())
     for pill_a in pills:
@@ -220,23 +237,24 @@ def generate_pill_edges(pill_diagnose_path):
                     w1 = filtered_pill_edges.loc[(pill_a, diag)]['weight']
                     w2 = filtered_pill_edges.loc[(pill_b, diag)]['weight']
                     if (pill_a, pill_b) in pill_pill_edges.index:
-                        pill_pill_edges.loc[(pill_a, pill_b)]['weight'] += w1 + w2
+                        pill_pill_edges.loc[(pill_a, pill_b)]['weight'] += w1 * w2
                     elif (pill_b, pill_a) in pill_pill_edges.index:
-                        pill_pill_edges.loc[(pill_b, pill_a)]['weight'] += w1 + w2
+                        pill_pill_edges.loc[(pill_b, pill_a)]['weight'] += w1 * w2
                     else:
-                        row = {'pill1': pill_a, 'pill2': pill_b, 'weight': w1 + w2}
-                        pill_pill_edges = pill_pill_edges.concat(row, ignore_index=True, verify_integrity=True)
+                        row = {'pill1': pill_a, 'pill2': pill_b, 'weight': w1 * w2}
+                        pill_pill_edges = pd.concat([pill_pill_edges, pd.DataFrame(row, index=[0])], ignore_index=True, verify_integrity=True)
 
     pill_pill_edges = pill_pill_edges.groupby(['pill1', 'pill2']).sum()
     print(pill_pill_edges.head())
+    print(f'max weight: {pill_pill_edges.weight.max()}')
     pill_pill_edges.to_csv('data/graph/pill_pill_graph.csv')
 
 if __name__ == '__main__':
     # build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
     # merge_multilabel_meta(root='./data/pills/', train=False)
     # build_size_graph(train=True)
-    print(build_size_graph_data())
+    # print(build_size_graph_data())
     # prepare_prescription_dataset('data/prescriptions/condensed_data.json')
-    # generate_pill_edges('data/graph/pill_diagnose_graph.csv')
+    generate_pill_edges('data/graph/pill_diagnose_graph.csv')
     # condensed_result_file()
     # test()

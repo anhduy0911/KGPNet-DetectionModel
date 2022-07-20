@@ -105,14 +105,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
-        self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
-        self.cls_score = nn.Linear(roi_features, num_classes + 1)
+        # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
+        self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
         num_bbox_reg_classes = 1 if kwargs['cls_agnostic_bbox_reg'] else num_classes
         box_dim = len( kwargs['box2box_transform'].weights)
-        self.bbox_pred = nn.Linear(roi_features, num_bbox_reg_classes * box_dim)
+        self.bbox_pred = nn.Linear(roi_features + hidden_size, num_bbox_reg_classes * box_dim)
         self.softmax = nn.Softmax(dim=-1)
         self.sigmoid = nn.Sigmoid()
-
+    
     @classmethod
     def from_config(cls, cfg):
         return {
@@ -151,7 +151,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         # print(data)
         adj_mat = to_dense_adj(data.edge_index, edge_attr=data.edge_attr).squeeze()
         # pad 0 to the end of the adj matrix
-        adj_mat = torch.softmax(adj_mat, dim=-1)
+        # adj_mat = torch.softmax(adj_mat, dim=-1)
         # adj_mat = adj_mat / (torch.max(adj_mat, dim=-1, keepdim=    True)[0] + 1e-8)
         # adj_mat = 1 / 2 * (adj_mat + adj_mat.t())
         adj_mat = torch.cat([adj_mat, torch.zeros((1, self.arg['num_classes']), dtype=torch.float32)], dim=0)
@@ -213,9 +213,8 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         x_context = self.graph_block(dynamic_adj_mat, cls_w_sm) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
-        x_enhanced = self.fc2(x_enhanced)
         
-        proposal_deltas = self.bbox_pred(x_enhanced)
+        proposal_deltas = self.p_cls_score(x_enhanced)
         scores = self.cls_score(x_enhanced)
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
