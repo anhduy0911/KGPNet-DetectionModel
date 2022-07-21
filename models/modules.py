@@ -20,7 +20,7 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import JS_loss_fast_compute, KL_loss_fast_compute, graph_embedding_loss
+from utils.losses import adj_based_loss_4
 import config as CFG
 import pickle
 import tqdm
@@ -87,7 +87,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5, 'loss_aux': 0.01}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -105,11 +105,11 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
-        # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
-        self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
+        self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
+        self.cls_score = nn.Linear(roi_features, num_classes + 1)
         num_bbox_reg_classes = 1 if kwargs['cls_agnostic_bbox_reg'] else num_classes
         box_dim = len( kwargs['box2box_transform'].weights)
-        self.bbox_pred = nn.Linear(roi_features + hidden_size, num_bbox_reg_classes * box_dim)
+        self.bbox_pred = nn.Linear(roi_features, num_bbox_reg_classes * box_dim)
         self.softmax = nn.Softmax(dim=-1)
         self.sigmoid = nn.Sigmoid()
     
@@ -213,8 +213,9 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         x_context = self.graph_block(dynamic_adj_mat, cls_w_sm) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
-        
-        proposal_deltas = self.p_cls_score(x_enhanced)
+        x_enhanced = self.fc2(x_enhanced)
+
+        proposal_deltas = self.bbox_pred(x_enhanced)
         scores = self.cls_score(x_enhanced)
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)
@@ -260,12 +261,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
+        aux_loss = adj_based_loss_4(pseudo_scores, self.dense_adj_matrix[0], margin=700)
         losses = {
             "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
-            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean")
+            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
+            "loss_aux": aux_loss
             # "loss_p_cls": multilabel_soft_margin_loss(pseudo_scores, adj_gt_classes, reduction="mean")
         }
         return {k: v * self.loss_weight.get(k, 1.0) for k, v in losses.items()}

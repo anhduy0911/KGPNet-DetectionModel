@@ -1,5 +1,5 @@
 import torch
-
+import time
 
 def KL_loss_fast_compute(target, input, eps=1e-6):
     '''
@@ -74,3 +74,60 @@ def graph_embedding_loss(out_features, adj_matrix, threshold=0, eps=1e-6):
 
     loss = torch.sum(torch.abs(adj_matrix - cosine_inp) * mask_matrix)    
     return loss
+
+def adj_based_loss_4(pseudo_scores, adj_matrix, margin=0.05):
+    '''
+    triplet loss computation for neighbor pills - positive couplets, non-neighbor pills - negative couplets
+    '''
+    # k = len(gt_labels)
+    # import pdb; pdb.set_trace()
+    N, C = pseudo_scores.shape
+
+    pred_scores, pred_labels = torch.sort(pseudo_scores, dim=-1, descending=True) # N
+    pred_scores = pred_scores[:, 0]
+    # print(pred_scores.shape)
+    pred_labels = pred_labels[:, 0]
+
+    _, labels_neighbors =  torch.sort(adj_matrix[pred_labels], dim=-1, descending=True) # N, C
+    # positive couplets for all predicted labels
+
+    pos_labels_neighbors = labels_neighbors[:, :10] # N, 10
+    # negative couplets for all predicted labels
+    neg_labels_neighbors = labels_neighbors[:, -10:] # N, 10
+ 
+    pos_scores = 1 - torch.stack([torch.index_select(pseudo_scores, dim=1, index=pos_labels_neighbors[i]) for i in range(N)], dim=0) # N, N, 10
+    neg_scores = 1 - torch.stack([torch.index_select(pseudo_scores, dim=1, index=neg_labels_neighbors[i]) for i in range(N)], dim=0) # N, N, 10
+
+    pos_scores = 1 - torch.prod(pos_scores, dim=1) # N, 10
+    neg_scores = 1 - torch.prod(neg_scores, dim=1) # N, 10
+
+    pos_scores = torch.sum(pos_scores, dim=1) # N
+    neg_scores = torch.sum(neg_scores, dim=1) # N
+
+    loss = pred_scores * neg_scores - pred_scores * pos_scores
+    loss = torch.sum(loss) + margin
+    # print(f'here {loss}')
+    return torch.max(loss, torch.zeros(1, device=loss.device))[0]
+
+if __name__ == '__main__':
+    # for i in range(200):
+        pseu = torch.softmax(torch.rand(128 * 4, 97, requires_grad=True), dim=1)
+        # mask = torch.rand(96 * 128, 96 * 128)
+        adj = torch.rand(97, 97)
+
+        gt_rois = torch.randint(0, 96, (4,128))
+        # import time
+        # start_t = time.time()x
+        # # loss = adj_based_loss(a, mask, adj, torch.tensor([1,2,3],dtype=torch.long))
+        # loss = adj_loss_recur_fs(pseu, adj, gt_rois, [[82, 93, 96],[51, 96]])
+        # print(loss)
+        # print(time.time() - start_t)
+        start_time = time.time()
+        # loss = adj_loss_recur(pseu, adj, [[82, 93, 96],[51, 96]])
+        roi_feats =  torch.rand(128 * 4, 1024)
+        # loss = adj_based_loss_2(pseu, adj, roi_feats, [torch.tensor([82, 93, 96]),torch.tensor([51, 96])])
+        loss = adj_based_loss_4(pseu, adj)
+        # a, b, c, d, loss = recur_prop_ij(pseu, 1, 2, 256)
+        print(loss)
+        print(time.time() - start_time)
+        # assert(loss > 0)
