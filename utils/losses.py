@@ -109,6 +109,37 @@ def adj_based_loss_4(pseudo_scores, adj_matrix, margin=0.05):
     # print(f'here {loss}')
     return torch.max(loss, torch.zeros(1, device=loss.device))[0]
 
+def adj_based_loss_5(pseudo_scores, adj_matrix, gtruth_class, margin=0.05):
+    '''
+    triplet loss computation for neighbor pills - positive couplets, non-neighbor pills - negative couplets
+    '''
+    # k = len(gt_labels)
+    # import pdb; pdb.set_trace()
+    N, C = pseudo_scores.shape
+    
+    pred_scores =  pseudo_scores[torch.arange(0, N), gtruth_class]
+    pred_scores_masked = pred_scores * (gtruth_class != 96)
+    _, labels_neighbors =  torch.sort(adj_matrix[gtruth_class], dim=-1, descending=True) # N, C
+    # positive couplets for all predicted labels
+
+    pos_labels_neighbors = labels_neighbors[:, :3] # N, 10
+    # negative couplets for all predicted labels
+    neg_labels_neighbors = labels_neighbors[:, -3:] # N, 10
+ 
+    pos_scores = 1 - torch.stack([torch.index_select(pseudo_scores, dim=1, index=pos_labels_neighbors[i]) for i in range(N)], dim=0) # N, N, 10
+    neg_scores = 1 - torch.stack([torch.index_select(pseudo_scores, dim=1, index=neg_labels_neighbors[i]) for i in range(N)], dim=0) # N, N, 10
+
+    pos_scores = 1 - torch.prod(pos_scores, dim=1) # N, 10
+    neg_scores = 1 - torch.prod(neg_scores, dim=1) # N, 10
+
+    pos_scores = torch.sum(pos_scores, dim=1) # N
+    neg_scores = torch.sum(neg_scores, dim=1) # N
+
+    loss = pred_scores_masked * neg_scores - pred_scores_masked * pos_scores
+    loss = torch.sum(loss) + margin
+    # import pdb; pdb.set_trace()
+    return torch.max(loss, torch.zeros(1, device=loss.device))[0]
+
 if __name__ == '__main__':
     # for i in range(200):
         pseu = torch.softmax(torch.rand(128 * 4, 97, requires_grad=True), dim=1)

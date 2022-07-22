@@ -20,7 +20,7 @@ from detectron2.layers import (
 )
 from detectron2.structures import Instances, Boxes
 from detectron2.utils.events import get_event_storage
-from utils.losses import adj_based_loss_4
+from utils.losses import *
 import config as CFG
 import pickle
 import tqdm
@@ -87,7 +87,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         kwargs.pop("roi_batch")
 
         super().__init__(**kwargs)
-        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5, 'loss_aux': 0.01}
+        self.loss_weight = {'loss_cls': 1., 'loss_box_reg': 1., 'loss_p_cls': 0.5, 'loss_aux': 0.015}
         self.p_cls_score = nn.Linear(roi_features, num_classes + 1)
         # self.warmstart_pseudo_output_heads()
         # print(f'ROI BATCH: {self.roi_batch}')
@@ -261,13 +261,14 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         else:
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
-        aux_loss = adj_based_loss_4(pseudo_scores, self.dense_adj_matrix[0], margin=700)
+        # aux_loss = adj_based_loss_4(pseudo_scores, self.dense_adj_matrix[0], margin=700)
+        aux_loss = adj_based_loss_5(pseudo_scores, self.dense_adj_matrix[0], gt_classes, margin=1000)
         losses = {
             "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
             "loss_box_reg": self.box_reg_loss(
                 proposal_boxes, gt_boxes, proposal_deltas, gt_classes
             ),
-            "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
+            # "loss_p_cls": nll_loss(torch.log(pseudo_scores), gt_classes, reduction="mean"),
             "loss_aux": aux_loss
             # "loss_p_cls": multilabel_soft_margin_loss(pseudo_scores, adj_gt_classes, reduction="mean")
         }
