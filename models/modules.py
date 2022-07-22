@@ -100,16 +100,18 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         nn.Linear(roi_features, hidden_size),
         # nn.BatchNorm1d(hidden_size), 
         nn.LeakyReLU(),
+        nn.Linear(hidden_size, hidden_size),
+        nn.LeakyReLU(),
         nn.Linear(hidden_size, hidden_size)
         )
-        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 1)
+        self.graph_block = GTN(len(self.dense_adj_matrix) + 1, CFG.num_head_gtn, roi_features, self.hidden_size, 2)
         
         # self.attention_dense = nn.Linear(hidden_size * 2, hidden_size)
-        # self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
-        self.cls_score = nn.Linear(hidden_size + roi_features, num_classes + 1)
+        self.fc2 = nn.Linear(hidden_size + roi_features, roi_features)
+        self.cls_score = nn.Linear(roi_features, num_classes + 1)
         num_bbox_reg_classes = 1 if kwargs['cls_agnostic_bbox_reg'] else num_classes
         box_dim = len( kwargs['box2box_transform'].weights)
-        self.bbox_pred = nn.Linear(roi_features + hidden_size, num_bbox_reg_classes * box_dim)
+        self.bbox_pred = nn.Linear(roi_features, num_bbox_reg_classes * box_dim)
         self.softmax = nn.Softmax(dim=-1)
         self.sigmoid = nn.Sigmoid()
     
@@ -213,8 +215,9 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
         x_context = self.graph_block(dynamic_adj_mat, cls_w_sm) # N, H
         
         x_enhanced = torch.cat([x, x_context], dim=1)
+        x_enhanced = self.fc2(x_enhanced)
         
-        proposal_deltas = self.p_cls_score(x_enhanced)
+        proposal_deltas = self.bbox_pred(x)
         scores = self.cls_score(x_enhanced)
         # proposal_deltas = self.bbox_pred(x)
         # scores = self.cls_score(x)

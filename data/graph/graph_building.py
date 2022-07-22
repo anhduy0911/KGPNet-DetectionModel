@@ -91,6 +91,9 @@ def build_graph_data():
     edge_weight = []
     
     pill_edge = pd.read_csv(CFG.graph_root + 'pill_pill_graph.csv', header=0)
+    print(pill_edge.head())
+    pill_edge = pill_edge[pill_edge['weight'] > pill_edge['weight'].quantile(0.2)]
+    print(pill_edge.head())
     for x, y, w in pill_edge.values:
         if x in mapped_pill_idx and y in mapped_pill_idx:
             assert(w > 0)
@@ -251,10 +254,10 @@ def generate_pill_edges(pill_diagnose_path):
 
 if __name__ == '__main__':
     # build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
-    # merge_multilabel_meta(root='./data/pills/', train=False)
-    # build_size_graph(train=True)
+    # merge_multilabel_meta(root='./data/pills/', train=True)
+    build_size_graph(train=True)
     # print(build_size_graph_data())
     # prepare_prescription_dataset('data/prescriptions/condensed_data.json')
-    generate_pill_edges('data/graph/pill_diagnose_graph.csv')
+    # generate_pill_edges('data/graph/pill_diagnose_graph.csv')
     # condensed_result_file()
     # test()
