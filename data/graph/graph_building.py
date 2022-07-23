@@ -250,7 +250,7 @@ def generate_pill_edges(pill_diagnose_path):
     pill_pill_edges.to_csv('data/graph/pill_pill_graph.csv')
 
 if __name__ == '__main__':
-    # build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
+    build_KG_graph('data/prescription/_merged_prescriptions.json', name='pill_diagnose_graph')
     # merge_multilabel_meta(root='./data/pills/', train=False)
     # build_size_graph(train=True)
     # print(build_size_graph_data())

@@ -262,7 +262,7 @@ class KGPNetOutputLayers(FastRCNNOutputLayers):
             proposal_boxes = gt_boxes = torch.empty((0, 4), device=proposal_deltas.device)
 
         # aux_loss = adj_based_loss_4(pseudo_scores, self.dense_adj_matrix[0], margin=700)
-        aux_loss = adj_based_loss_5(pseudo_scores, self.dense_adj_matrix[0], gt_classes, margin=1000)
+        aux_loss = adj_based_loss_5(pseudo_scores, self.dense_adj_matrix[0], gt_classes, margin=500)
         losses = {
             "loss_cls": cross_entropy(scores, gt_classes, reduction="mean"),
             "loss_box_reg": self.box_reg_loss(
